@@ -6,7 +6,7 @@
   }
 
   var defaults = {
-    name: '汤文 （Miles)',
+    name: '汤文',
     subtitlePrefix: "I'm ",
     headerClass: 'header-top',
     active: '',
