@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>主流大模型架构：三种解码器体系与 Bert、GPT、Qwen 系对比</title>
+  <style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", sans-serif; background: linear-gradient(180deg, #0f172a 0%, #1a1f3a 100%); background-image: linear-gradient(rgba(99, 102, 241, 0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(99, 102, 241, 0.05) 1px, transparent 1px), linear-gradient(180deg, #0f172a 0%, #1a1f3a 100%); background-size: 40px 40px, 40px 40px, 100% 100%; color: #cbd5e1; line-height: 1.75; min-height: 100vh; }
+.article-container { max-width: 820px; margin: 0 auto; padding: 48px 28px; }
+.article-title { color: #e2e8f0; font-size: 2rem; font-weight: 600; line-height: 1.3; margin-bottom: 18px; }
+.article-meta { color: #94a3b8; font-size: 0.95rem; padding-bottom: 20px; margin-bottom: 32px; border-bottom: 1px solid rgba(148, 163, 184, 0.15); }
+.article-container h2 { color: #d1d5db; font-size: 1.5rem; font-weight: 600; margin: 40px 0 18px; }
+.article-container p { margin-bottom: 18px; font-size: 1rem; color: #cbd5e1; }
+.inline-code { background-color: #1e1b4b; color: #c4b5fd; padding: 2px 8px; border-radius: 4px; font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; font-size: 0.92em; }
+.article-container ul { padding-left: 24px; margin-bottom: 18px; }
+.article-container li { margin-bottom: 8px; color: #cbd5e1; }
+.article-container strong { color: #e2e8f0; font-weight: 600; }
+::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar-track { background: rgba(15, 23, 42, 0.5); }
+::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #475569; }
+@media (max-width: 640px) { .article-container { padding: 32px 16px; } .article-title { font-size: 1.6rem; } }
+  </style>
+</head>
+<body>
+  <div class="article-container">
+    <h1 class="article-title">主流大模型架构：三种解码器体系与 Bert、GPT、Qwen 系对比</h1>
+    <div class="article-meta">作者：汤文&nbsp;&nbsp;日期：2025-07-18&nbsp;&nbsp;阅读时长：约 11 分钟</div>
+
+    <p>上一篇看的是 Transformer 的通用结构，这一篇转向工程选型：Prefix Decoder、Causal Decoder、Encoder-Decoder 三种体系到底差在哪里，Bert 与 GPT 各自的设计取向如何，以及 Qwen、LLaMA、ChatGLM 这些主流开源模型在注意力、位置编码与归一化上的具体取舍。</p>
+
+    <h2>Transformer 细节说明</h2>
+
+    <p>在 Transformer 出现之前，编码器和解码器的计算核心主要是以 RNN 为主的。但 RNN 有几个明显的缺点：<strong>信息丢失</strong>、<strong>无法处理较长的句子</strong>，以及<strong>不能并行计算</strong>。</p>
+
+    <p>Transformer 不采用 RNN 的结构，而是使用全局信息，代价是它本身不能利用单词的顺序信息——而顺序信息对于 NLP 来说非常重要。所以 Transformer 中使用了<strong>位置 Embedding</strong>，用来保存单词在序列中的相对或绝对位置。</p>
+
+    <p>在编码器一侧，<strong>最上层编码器的输出会被转化为 K（键向量）和 V（值向量）</strong>，供后续的解码过程使用。这一转化过程与 Transformer 自注意力机制中生成 Q、K、V 的逻辑类似，核心都是<strong>通过矩阵乘法</strong>实现的。</p>
+
+    <p>另一条需要记住的结论是：<strong>多头注意力层不会改变输入的形状，一个编码器的输入和输出是相同形状的</strong>。经过编码器内部的自注意力层、前馈神经网络层，以及残差连接和层归一化操作之后，输出的依然是一个结构相同的列表。</p>
+
+    <p>这种输入与输出形状的一致性，确保了编码器可以堆叠使用：下层编码器的输出能够直接作为上层编码器的输入。</p>
+
+    <h2>目前主流的开源模型体系有哪些？</h2>
+
+    <p>目前主流的开源模型体系分为三种：<strong>Prefix Decoder</strong>、<strong>Causal Decoder</strong>与 <strong>Encoder-Decoder</strong>。三者的差别，可以先用「输入用什么注意力、输出用什么注意力」这一组坐标来快速定位。</p>
+
+    <p><strong>Prefix Decoder</strong>：输入采用<strong>双向注意力</strong>，输出采用<strong>单向注意力</strong>。也就是说，对于用户的输入采用双向注意力，对于模型生成的内容采用单向注意力。</p>
+
+    <p><strong>Causal Decoder</strong>：输入采用<strong>单向注意力</strong>，输出也采用<strong>单向注意力</strong>。也就是无论用户输入还是模型生成的内容，都使用单向注意力。</p>
+
+    <p><strong>Encoder-Decoder</strong>：输入采用<strong>双向注意力</strong>，输出采用<strong>单向注意力</strong>。即对用户的输入采用双向注意力，对模型生成的内容采用单向注意力。</p>
+
+    <p><strong>Prefix Decoder 与 Encoder-Decoder 的区别</strong>值得单独说明，因为二者的注意力形态看起来完全一样，真正的差异在于模块结构以及参数是否共享。</p>
+
+    <p><strong>Encoder-Decoder</strong> 中包含两个独立的模块，各司其职。<strong>Encoder 完全双向</strong>，每个 token 都可以看到输入中的所有其他 token；<strong>Decoder 是单向的</strong>（因果掩码），确保在生成第 <code class="inline-code">i</code> 个 token 时，只能看到它之前的 token。这种模型对于输入和输出的参数<strong>无共享</strong>，也就是两套独立参数。</p>
+
+    <p><strong>Prefix Decoder</strong> 则是一种「一体化」方案，它本质上是一个<strong>只有 Decoder 的模型</strong>。我们把输入序列 <code class="inline-code">[A, B, C]</code> 和输出序列 <code class="inline-code">[X, Y, Z]</code> 拼接成一个长序列 <code class="inline-code">[A, B, C, X, Y, Z]</code>。在训练和推理过程中，对于「前缀」部分 <code class="inline-code">[A, B, C]</code>，我们<strong>允许完全双向注意力</strong>；对于「后缀」部分 <code class="inline-code">[X, Y, Z]</code>，则应用标准的<strong>因果掩码</strong>。</p>
+
+    <p>在这种掩码安排下，X 只能看到 <code class="inline-code">[A, B, C]</code>，Y 只能看到 <code class="inline-code">[A, B, C, X]</code>，以此类推。这样模型在生成输出 token 时，能够充分感知到<strong>整个输入序列（前缀）的完整上下文信息</strong>，同时又遵守了自回归生成的规则。这种模型对于输入和输出<strong>共享一套参数</strong>。</p>
+
+    <p>至于 <strong>Causal Decoder</strong>，它是一种自回归语言模型，同样只有一个 Decoder 的模型，但对于输入序列和输出序列都采用单向注意力。</p>
+
+    <p>【注】还有一种 Encoder-only 的架构，不过它只属于 NLP 基础体系架构，<strong>大语言模型没有 Encoder-only 架构</strong>。</p>
+
+    <p>原因有两点。第一，现在的大语言模型都用于生成式任务，而纯 Encoder 没有自回归生成能力，无法直接输出连贯的长文本（比如写文章、对话、翻译）。</p>
+
+    <p>第二，纯 Encoder 的输出是一个高维向量。它必须搭配<strong>下游任务头</strong>才能输出具体结果，而且结果是<strong>固定类别或标签</strong>，而非自由文本。常见的搭配方式如下：</p>
+
+    <ul>
+      <li><strong>文本分类（如情感分析）</strong>：任务头设计为对输出的向量加全连接层 + SoftMax，最终输出标签（如「正面／负面／中性」），不能生成长文本，仅输出 1 个标签。</li>
+      <li><strong>命名实体识别（NER）</strong>：任务头设计为对每个 token 向量加全连接层 + SoftMax，最终输出标签序列（如「人名／地名／无实体」），不能生成长文本，仅输出 token 级标签。</li>
+      <li><strong>语义匹配（如问答匹配）</strong>：任务头设计为计算两个句子向量的余弦相似度，最终输出相似度分数（如 0.85），不能生成长文本，仅输出 1 个数值。</li>
+    </ul>
+
+    <p>BERT 作为典型的纯 Encoder 架构模型，其核心价值是<strong>学习文本的高质量语义表示</strong>，而非直接完成具体任务。它的预训练过程仅通过<strong>掩码语言建模（MLM）</strong>和<strong>句子对预测（NSP）</strong>学习通用的语言规律，输出的是高维语义向量。这些向量本身没有实际任务意义，必须搭配<strong>下游任务头（Task Head）</strong>，才能实现分类、匹配、抽取等具体功能。</p>
+
+    <h2>单向注意力与双向注意力</h2>
+
+    <p>先把两个定义摆清楚。<strong>双向注意力</strong>：不使用掩码，某个位置的 token 可以看到前后的所有 token。<strong>单向注意力</strong>：使用掩码覆盖，某个位置的 token 只能看到它之前的 token。</p>
+
+    <p>举个例子。在 Transformer 架构中，对于输入 <code class="inline-code">what is your name</code>，系统会将这四个单词转为向量，再通过 Wq、Wk、Wv 并行处理转为 Q、K、V。然后计算 <code class="inline-code">QK^T</code>，通过掩码矩阵与 <code class="inline-code">QK^T</code> 的对位相乘，就可以实现单向注意力的效果。</p>
+
+    <p><strong>1. 双向注意力（Encoder 中的机制）</strong>：对于输入序列 <code class="inline-code">[what, is, your, name]</code>，每个单词都会生成自己的一组 <strong>Q（查询）</strong>、<strong>K（键）</strong>、<strong>V（值）</strong>向量。</p>
+
+    <p>当计算 <code class="inline-code">what</code> 这个词的注意力输出时，它的查询向量 <code class="inline-code">q_what</code> 会与<strong>整个序列</strong>所有词的键向量进行计算：<code class="inline-code">k_what</code>、<code class="inline-code">k_is</code>、<code class="inline-code">k_your</code>、<code class="inline-code">k_name</code>。随后得到一个注意力分数向量 <code class="inline-code">[score(what, what), score(what, is), score(what, your), score(what, name)]</code>。</p>
+
+    <p>这个分数决定了在编码 <code class="inline-code">"what"</code> 这个词时，应该从<strong>所有词（包括它自己）</strong>中分别汲取多少信息。其核心是：<code class="inline-code">q_i</code> 与<strong>所有</strong>的 <code class="inline-code">k_j</code>（其中 j = 1, 2, 3, 4）进行点积，这意味着每个词在编码时都拥有<strong>全局的、完整的上下文信息</strong>。</p>
+
+    <p>结果就是：<code class="inline-code">"what"</code> 的最终表示包含了 <code class="inline-code">"is your name"</code> 的信息；同样，<code class="inline-code">"name"</code> 的表示也包含了 <code class="inline-code">"what is your"</code> 的信息。这是一种「全盘理解」。</p>
+
+    <p><strong>2. 单向／因果注意力（Decoder 中的机制）</strong>：在 Decoder 中，为了确保生成过程是自回归的（只能根据已生成的内容预测下一个），它使用了单向注意力。同样对于序列 <code class="inline-code">[what, is, your, name]</code>（此时这个序列是 Decoder 的输入，比如在训练时），每个单词同样会生成自己的 <strong>Q, K, V</strong>。</p>
+
+    <p>当计算 <code class="inline-code">your</code> 这个词的注意力输出时，它的查询向量 <code class="inline-code">q_your</code> <strong>只能</strong>与它<strong>之前</strong>的词的键向量进行计算：<code class="inline-code">k_what</code>、<code class="inline-code">k_is</code>、<code class="inline-code">k_your</code>。它<strong>绝对不能</strong>与 <code class="inline-code">k_name</code> 进行计算，因为 <code class="inline-code">"name"</code> 是「未来」的词。因此它的注意力分数向量是 <code class="inline-code">[score(your, what), score(your, is), score(your, your), 0]</code>，其中的 0 是通过注意力掩码实现的——注意力掩码把未来位置置为 0。</p>
+
+    <p>其核心是：<code class="inline-code">q_i</code> 只与 <code class="inline-code">k_1</code> 到 <code class="inline-code">k_i</code> 进行计算，而不会与 <code class="inline-code">k_{i+1}, k_{i+2}, ...</code> 计算。这就像蒙住模型的眼睛，不让它看到「未来」的信息。</p>
+
+    <p>结果就是：<code class="inline-code">"your"</code> 的表示只基于 <code class="inline-code">"what is your"</code> 来构建，它不知道后面紧接着的是 <code class="inline-code">"name"</code>。这保证了模型在预测下一个词时，只能依赖于已经生成的词，符合真实的生成场景。</p>
+
+    <p>这里涉及的概念是<strong>自回归</strong>：用过去的值来预测当前值。所谓<strong>自回归生成</strong>，即生成当前令牌时只能依赖已生成的内容。</p>
+
+    <h2>目前主流大模型的架构</h2>
+
+    <p>接下来逐个拆开看：先是 Bert 的纯编码器结构，再是 GPT 的纯解码器结构，然后对比二者在任务取向上的差别，最后落到 Qwen、LLaMA、ChatGLM 这几个系列各自的设计选择。</p>
+
+    <h2>Bert 架构</h2>
+
+    <p>BERT 是 Transformer 的<strong>纯编码器（Encoder-only）架构</strong>，主打<strong>双向上下文理解</strong>。BERT 的整体架构由输入层、多层 Transformer 编码器、输出层三部分组成。</p>
+
+    <p><strong>1. 输入处理：统一的词嵌入表示。</strong>BERT 的输入是一个<strong>融合三类信息的向量</strong>，长度固定为 <code class="inline-code">max_seq_length</code>（通常为 128 或 512），具体构成如下。</p>
+
+    <ul>
+      <li><strong>词嵌入（Token Embeddings）</strong>：用 WordPiece 分词（比 BPE 更适合多语言），将每个子词映射为固定维度向量（如 768／1024）。</li>
+      <li><strong>分段嵌入（Segment Embeddings）</strong>：区分输入中的不同句子（如问答任务的问题和上下文），用 <code class="inline-code">0</code>／<code class="inline-code">1</code> 标记不同分段。</li>
+      <li><strong>位置嵌入（Positional Embeddings）</strong>：采用<strong>固定三角函数编码</strong>（与 Transformer 原论文一致），而非 GPT 的可训练嵌入，确保模型对不同长度文本的泛化性。</li>
+      <li><strong>特殊标记</strong>：<code class="inline-code">[CLS]</code> 是句子级特征标记，位于输入最开头，用于分类任务；<code class="inline-code">[SEP]</code> 是分隔不同句子的标记；<code class="inline-code">[PAD]</code> 是填充标记，用于补齐长度不足的序列。最终输入向量 = 词嵌入 + 分段嵌入 + 位置嵌入。</li>
+    </ul>
+
+    <p><strong>2. Transformer 编码器层（核心）。</strong>每个编码器层包含两个核心子层，<strong>所有子层都配备残差连接和层归一化</strong>（Pre-LN 或 Post-LN，BERT 原版为 Post-LN）。</p>
+
+    <ul>
+      <li><strong>多头自注意力（Multi-Head Attention）</strong>：其核心是<strong>双向注意力</strong>，允许每个 token 关注输入序列中<strong>所有其他 token</strong>（包括前文和后文），彻底解决单向模型的信息局限。</li>
+      <li><strong>前馈神经网络（FFN）</strong>：对每个 token 的特征做独立非线性变换，公式为 <code class="inline-code">FFN(x) = max(0, xW1 + b1)W2 + b2</code>，激活函数早期用 ReLU，后续版本升级为 GeLU。</li>
+    </ul>
+
+    <p>这里有一个关键区别：BERT 的注意力<strong>无掩码</strong>，而 GPT 的掩码自注意力会屏蔽未来 token。</p>
+
+    <p><strong>3. 输出层：灵活适配下游任务。</strong><strong>BERT 的输出是每个 token 的上下文表征向量</strong>，下游任务无需修改编码器，只需添加简单的输出头即可。</p>
+
+    <ul>
+      <li><strong>分类任务</strong>：取 <code class="inline-code">[CLS]</code> 标记的向量，接一层全连接 + Softmax。</li>
+      <li><strong>命名实体识别（NER）</strong>：取每个 token 的向量，接全连接 + Softmax 做序列标注。</li>
+      <li><strong>问答任务</strong>：取每个 token 的向量，预测答案的起始和结束位置。</li>
+    </ul>
+
+    <h2>GPT 架构</h2>
+
+    <p>GPT 整体由输入层、多层 Transformer 解码器、输出层构成，核心设计围绕文本生成的自回归特性展开。</p>
+
+    <p><strong>1. 输入处理。</strong>分词与词嵌入方面，GPT 用 Byte-Pair Encoding（BPE）做子词分词，通过词嵌入矩阵映射为固定维度向量。位置编码方面，它采用可训练位置嵌入（Learnable Positional Embeddings），而非 Transformer 原论文的固定三角函数编码，让模型自主学习序列位置信息。</p>
+
+    <p><strong>2. Transformer 解码器层（核心）。</strong>每个解码器层包含两个核心子层，配合残差连接与层归一化稳定训练。</p>
+
+    <ul>
+      <li><strong>掩码多头自注意力（Masked Multi-Head Attention）</strong>：通过前瞻掩码（Look-Ahead Mask）屏蔽未来 token，确保生成时仅依赖前文，避免信息泄露。</li>
+      <li><strong>前馈神经网络（FFN，feedforward neural network）</strong>：对每个位置的特征独立做非线性变换，提升表征能力，常用 GeLU／SwiGLU 激活函数。</li>
+      <li><strong>残差连接 + 层归一化</strong>：缓解深层网络梯度消失，加速收敛，层归一化通常置于子层输入前（Pre-LN）。</li>
+      <li><strong>注</strong>：GPT 解码器移除了 Transformer 原始解码器中的编码器-解码器交叉注意力层，仅保留自注意力与 FFN。</li>
+    </ul>
+
+    <p><strong>3. 输出层。</strong>解码器输出经线性变换映射到词表维度，再通过 Softmax 生成下一个 token 的概率分布，实现自回归生成。</p>
+
+    <p>【注】GPT-4 引入 MoE，动态激活部分参数，以平衡规模与效率；GPT-4 还通过跨模态编码器实现文本-图像联合理解。</p>
+
+    <h2>Bert 与 GPT 对比</h2>
+
+    <p>先看预训练任务这一层差异。</p>
+
+    <ul>
+      <li><strong>GPT 的预训练：预测下一个 token</strong>。任务本身就是「生成式」的，模型会不断学习「前文→后文」的关联，所以生成连贯文本的能力更强。</li>
+      <li><strong>BERT 的预训练：掩码语言模型（MLM）</strong>。任务是「补全被遮盖的词」，需要同时理解前后文才能猜对，所以模型会更擅长「语义理解、信息提取」类任务。</li>
+    </ul>
+
+    <p>由此得到两者的能力定位：BERT 的核心能力是自然语言理解（NLU），GPT 的核心能力是自然语言生成（NLG）。</p>
+
+    <p><strong>举个例子。</strong>翻译任务属于「序列转换」（输入文本→输出另一种语言文本），更适合用 <strong>Encoder-Decoder 架构的 Transformer 模型</strong>（比如 T5、BART、Google Transformer 原版），而非单纯的 GPT（Decoder-only）或 BERT（Encoder-only）。原因很简单：翻译需要同时完成「理解源语言」和「生成目标语言」，而 Encoder-Decoder 刚好拆分了这两个步骤。</p>
+
+    <p>如果只能在 GPT／BERT 里选，<strong>GPT 更适合（但效果不如 Encoder-Decoder）</strong>。</p>
+
+    <ul>
+      <li>GPT 可以通过「提示词」（比如「将『你好』翻译成英文：」）做翻译，但依赖上下文长度和提示质量。</li>
+      <li>BERT 擅长理解，但本身没有生成能力，无法直接输出翻译结果。</li>
+    </ul>
+
+    <p>再看一个 GPT 推理时的具体过程。如果输入提示词是「今天天气真好。」，那么它预测下一个词的过程是在<strong>掩码多头自注意力层</strong>中完成的：模型只能让当前位置的查询向量关注到它之前的 token，而看不到后面的 token，从而保证了「今天天气真好」之后的下一个词是在不泄露未来信息的前提下被预测出来的。</p>
+
+    <h2>Qwen 系列，LLaMA 系列（1/2/3），ChatGLM 系列架构</h2>
+
+    <p>在位置编码这一层，Qwen 和 LLaMA 使用<strong>标准 RoPE</strong>；ChatGLM 则使用<strong>改进的 RoPE 适配中文</strong>，通过动态调整频率参数来优化位置建模。</p>
+
+    <p><strong>Qwen 系列</strong>是阿里达摩院开发的大语言模型家族，以 Transformer 解码器为核心，分为密集型与混合专家（MoE）两类，覆盖文本、代码、多模态等场景，核心优化包括 GQA、QK-Norm、RoPE 等。</p>
+
+    <p>其架构要点可以归纳为以下几条。</p>
+
+    <ul>
+      <li><strong>多层 Decoder-only 结构</strong>：基于 Transformer Decoder 架构，采用自回归生成模式。</li>
+      <li><strong>改进的注意力机制</strong>：采用<strong>分组查询注意力（Grouped Query Attention, GQA）</strong>，平衡计算效率和效果；部分版本支持<strong>滑动窗口注意力（Sliding Window Attention）</strong>来处理长序列。</li>
+      <li><strong>位置编码方案</strong>：采用<strong>动态 NTK 旋转位置编码（RoPE）</strong>，增强外推能力。</li>
+      <li><strong>归一化与激活函数</strong>：使用 <strong>RMSNorm</strong> 进行层归一化，计算更高效；采用 <strong>SwiGLU</strong> 激活函数，提升表达能力。</li>
+      <li><strong>归一化位置</strong>：将层归一化放在了多头注意力模块和全连接层的前面，即前置的 LayerNorm。</li>
+    </ul>
+
+    <p><strong>LLaMA 系列</strong>的架构改动同样集中在归一化、位置编码与激活函数上，可以概括为四点。</p>
+
+    <ul>
+      <li>和 GPT-3 一样，将 Normalization 从每个子层的输出位置移动到了输入位置。</li>
+      <li>将 Layer Norm 改为 RMS Norm。</li>
+      <li>采用旋转位置编码。</li>
+      <li>采用 silu 激活函数。</li>
+    </ul>
+
+    <p>训练流程方面，LLaMA2 的过程是：自回归预训练 → 监督微调训练 → 强化学习（对齐人类偏好）。这条链路也基本成为当前主流开源大模型的标准训练范式。</p>
+  </div>
+</body>
+</html>

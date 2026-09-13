@@ -1,57 +1,54 @@
 // ===================== 模拟数据（图片包含名称） =====================
         const albums = [{
             id: 1,
-            title: "二六年南昌五一摄影",
-            date: "2026-05-07",
-            description: "五一假期的南昌街头，记录下赣江的风与城市的烟火气。",
+            title: "宜昌三峡·大坝与峡江",
+            date: "2026-01-01",
+            description: "元旦沿 G348 三峡公路一路向西，大坝横江、峡江碧水与往来货轮尽收眼底。",
             images: [
-                { url: "https://picsum.photos/id/1018/800/600", name: "八一广场" },
-                { url: "https://picsum.photos/id/1015/800/600", name: "滕王阁远眺" },
-                { url: "https://picsum.photos/id/1019/800/600", name: "赣江日落" },
-                { url: "https://picsum.photos/id/1039/800/600", name: "街头随拍·一" },
-                { url: "https://picsum.photos/id/1043/800/600", name: "街头随拍·二" },
-                { url: "https://picsum.photos/id/1050/800/600", name: "地道美食" },
-                { url: "https://picsum.photos/id/1059/800/600", name: "夜色南昌" },
-                { url: "https://picsum.photos/id/1069/800/600", name: "江边晚风" }
+                { url: "../assets/img/photos/yichang-three-gorges-dam.jpg", name: "三峡大坝" },
+                { url: "../assets/img/photos/sanxia-g348-road.jpg", name: "G348 三峡公路" },
+                { url: "../assets/img/photos/xiling-gorge-ship.jpg", name: "西陵峡货轮" },
+                { url: "../assets/img/photos/xiajiang-cliff.jpg", name: "峡江峭壁" }
             ]
         }, {
             id: 2,
-            title: "城市夜景随拍",
-            date: "2026-04-20",
-            description: "夜色里的街头光影，霓虹与车流交织出的都市诗篇。",
+            title: "雪落天门山",
+            date: "2026-01-02",
+            description: "冬雪初霁的张家界，峰林挂霜，山谷里一汪碧水静得能照见天光。",
             images: [
-                { url: "https://picsum.photos/id/1070/800/600", name: "霓虹灯带" },
-                { url: "https://picsum.photos/id/1071/800/600", name: "高楼掠影" },
-                { url: "https://picsum.photos/id/1073/800/600", name: "车流光轨" },
-                { url: "https://picsum.photos/id/1074/800/600", name: "深夜便利店" },
-                { url: "https://picsum.photos/id/1076/800/600", name: "老街巷口" },
-                { url: "https://picsum.photos/id/1078/800/600", name: "雨夜倒影" }
+                { url: "../assets/img/photos/tianmen-mountain-snow.jpg", name: "雪落天门山" },
+                { url: "../assets/img/photos/tianmen-emerald-pool.jpg", name: "幽谷碧水" }
             ]
         }, {
             id: 3,
-            title: "山野徒步记录",
-            date: "2026-03-15",
-            description: "周末进山吸氧，松林、溪流与远山的呼吸。",
+            title: "金陵访古·明孝陵",
+            date: "2026-01-03",
+            description: "南京明孝陵半日，券门、碑殿与方城明楼，六百年的光阴落在青石板上。",
             images: [
-                { url: "https://picsum.photos/id/1036/800/600", name: "山间小径" },
-                { url: "https://picsum.photos/id/1044/800/600", name: "远眺群山" },
-                { url: "https://picsum.photos/id/1048/800/600", name: "松林晨光" },
-                { url: "https://picsum.photos/id/1058/800/600", name: "溪流潺潺" },
-                { url: "https://picsum.photos/id/1060/800/600", name: "山顶风光" }
+                { url: "../assets/img/photos/mingxiaoling-arch.jpg", name: "券门远眺" },
+                { url: "../assets/img/photos/mingxiaoling-stele.jpg", name: "治隆唐宋碑" },
+                { url: "../assets/img/photos/mingxiaoling-minglou.jpg", name: "方城明楼" }
             ]
         }, {
             id: 4,
-            title: "春日花事",
-            date: "2026-02-28",
-            description: "樱花与二月兰盛开的季节，每一步都是春天的告白。",
+            title: "暮色江城·武汉",
+            date: "2026-05-04",
+            description: "五一假期的黄昏登上蛇山，长江大桥、黄鹤楼与江城天际线一起被落日染成金色。",
             images: [
-                { url: "https://picsum.photos/id/106/800/600", name: "樱花如雪" },
-                { url: "https://picsum.photos/id/108/800/600", name: "二月兰花海" },
-                { url: "https://picsum.photos/id/110/800/600", name: "玉兰花开" },
-                { url: "https://picsum.photos/id/112/800/600", name: "桃花朵朵" },
-                { url: "https://picsum.photos/id/114/800/600", name: "郁金香田" },
-                { url: "https://picsum.photos/id/116/800/600", name: "油菜花田" },
-                { url: "https://picsum.photos/id/118/800/600", name: "路边野花" }
+                { url: "../assets/img/photos/wuhan-yangtze-bridge.jpg", name: "长江大桥暮色" },
+                { url: "../assets/img/photos/wuhan-river-dusk.jpg", name: "江城夕照" }
+            ]
+        }, {
+            id: 5,
+            title: "人间烟火·吃食记",
+            date: "2025-12-31",
+            description: "从跨年夜的土钵热汤、生日家宴，到面包房的黄油香气与一块奥利奥提拉米苏。",
+            images: [
+                { url: "../assets/img/photos/clay-pot-soup.jpg", name: "土钵热汤" },
+                { url: "../assets/img/photos/birthday-feast.jpg", name: "生日家宴" },
+                { url: "../assets/img/photos/gangou-dish.jpg", name: "干锅小炒" },
+                { url: "../assets/img/photos/bakery-bread.jpg", name: "面包房的香气" },
+                { url: "../assets/img/photos/oreo-tiramisu.jpg", name: "奥利奥提拉米苏" }
             ]
         }];
 

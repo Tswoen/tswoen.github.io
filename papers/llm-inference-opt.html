@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>推理优化与采样：RoPE、KV Cache、GQA 与 Temperature</title>
+  <style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", sans-serif; background: linear-gradient(180deg, #0f172a 0%, #1a1f3a 100%); background-image: linear-gradient(rgba(99, 102, 241, 0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(99, 102, 241, 0.05) 1px, transparent 1px), linear-gradient(180deg, #0f172a 0%, #1a1f3a 100%); background-size: 40px 40px, 40px 40px, 100% 100%; color: #cbd5e1; line-height: 1.75; min-height: 100vh; }
+.article-container { max-width: 820px; margin: 0 auto; padding: 48px 28px; }
+.article-title { color: #e2e8f0; font-size: 2rem; font-weight: 600; line-height: 1.3; margin-bottom: 18px; }
+.article-meta { color: #94a3b8; font-size: 0.95rem; padding-bottom: 20px; margin-bottom: 32px; border-bottom: 1px solid rgba(148, 163, 184, 0.15); }
+.article-container h2 { color: #d1d5db; font-size: 1.5rem; font-weight: 600; margin: 40px 0 18px; }
+.article-container p { margin-bottom: 18px; font-size: 1rem; color: #cbd5e1; }
+.inline-code { background-color: #1e1b4b; color: #c4b5fd; padding: 2px 8px; border-radius: 4px; font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; font-size: 0.92em; }
+.article-container ul { padding-left: 24px; margin-bottom: 18px; }
+.article-container li { margin-bottom: 8px; color: #cbd5e1; }
+.article-container strong { color: #e2e8f0; font-weight: 600; }
+::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar-track { background: rgba(15, 23, 42, 0.5); }
+::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #475569; }
+@media (max-width: 640px) { .article-container { padding: 32px 16px; } .article-title { font-size: 1.6rem; } }
+  </style>
+</head>
+<body>
+  <div class="article-container">
+    <h1 class="article-title">推理优化与采样：RoPE、KV Cache、GQA 与 Temperature</h1>
+    <div class="article-meta">作者：汤文&nbsp;&nbsp;日期：2025-07-24&nbsp;&nbsp;阅读时长：约 14 分钟</div>
+
+    <p>模型结构定下来之后，真正决定推理速度与成本的是外围优化。这一篇整理 RoPE 旋转位置编码为什么外推能力更好、KV Cache 与 Prompt Cache 各自缓存了什么、GQA 怎么把 KV 头数压下来、LayerNorm 与 RMSNorm 的差别，以及 Temperature、Top-k、Top-p 如何影响采样结果。</p>
+
+    <h2>旋转位置编码 RoPE（Rotary Position Embedding）</h2>
+
+    <p>最早的 Transformer 模型为了关注一句话中每个 token 的位置信息，使用了正弦和余弦函数来生成位置编码，然后把这些编码加到词嵌入上。这种固定的位置编码有两个明显的局限：一是它有固定的最大长度限制，也就是没有外推性；二是它可能无法很好地处理相对位置关系。</p>
+
+    <p>在原始 Transformer 的 Sinusoidal 位置编码中，编码函数是预先定义的：<code class="inline-code">PE(pos, 2i) = sin(pos / 10000^(2i/d))</code> 与 <code class="inline-code">PE(pos, 2i+1) = cos(pos / 10000^(2i/d))</code>。这里的 <code class="inline-code">pos</code> 是位置索引，如果我们训练模型时只见过 <code class="inline-code">pos=1</code> 到 <code class="inline-code">1024</code> 的位置，那么模型就<strong>没有学习过</strong>如何处理 <code class="inline-code">pos=1025</code> 的位置，它的权重可能无法泛化。</p>
+
+    <p>第二个局限是相对位置关系。所谓相对位置关系，也就是说对于位置 m 和位置 n，要在公式中体现（m-n）这个差值，而不是各自的绝对下标。</p>
+
+    <p>考虑两个位置 m 和 n，它们的绝对位置编码是 <code class="inline-code">PE(m)</code> 和 <code class="inline-code">PE(n)</code>。当计算注意力分数时，我们计算 <code class="inline-code">q·k</code>，其中 q 和 k 都包含了位置编码，但这里的位置信息是<strong>相加</strong>的，而不是<strong>交互</strong>的。</p>
+
+    <p>具体来说，<code class="inline-code">q_m = W_q * (x_m + PE(m))</code>，也就是把位置向量与 Token 向量直接相加。这导致相加后位置信息和原本的内容信息就混合了，也就影响了 <code class="inline-code">q·k</code> 对位置的敏感度。把点积展开看，会得到四项：</p>
+
+    <ul>
+      <li><strong>词-词交互：</strong><code class="inline-code">(W_q x_m)·(W_k x_n)</code>。</li>
+      <li><strong>词-位置交互：</strong><code class="inline-code">(W_q x_m)·(W_k PE(n))</code>。</li>
+      <li><strong>位置-词交互：</strong><code class="inline-code">(W_q PE(m))·(W_k x_n)</code>。</li>
+      <li><strong>位置-位置交互：</strong><code class="inline-code">(W_q PE(m))·(W_k PE(n))</code>，这一项只能体现绝对位置。</li>
+    </ul>
+
+    <p>也就是说，<code class="inline-code">q_m·k_n</code> 点积结果中的这四个部分，都无法体现（m-n）。</p>
+
+    <p>而在 RoPE 中，做法是把向量 <code class="inline-code">q_m</code> 旋转角度 <code class="inline-code">mθ</code>：<code class="inline-code">q'_m = R(mθ) q_m</code>，于是有 <code class="inline-code">q'_m · k'_n = [R(mθ) q_m]·[R(nθ) k_n] = q_m·[R(-mθ)R(nθ) k_n] = q_m·[R((n-m)θ) k_n]</code>。这个结果与（n-m）有关，也就是体现了 n 和 m 的相对位置。</p>
+
+    <p>顺着这个思路，我们真正想要的设计目标是：让查询向量 q 和键向量 k 的点积只依赖于它们的内容和相对位置差，而不是绝对位置。数学上的表达是 <code class="inline-code">⟨f_q(x_m, m), f_k(x_n, n)⟩ = g(x_m, x_n, m-n)</code>，其中 m 和 n 是位置，x 是词嵌入，也就是说公式只与内容 x 和相对位置（m-n）相关。</p>
+
+    <p>一个有用的几何类比是：在二维平面上，向量旋转 θ 角度可以用旋转矩阵表示，<code class="inline-code">R(θ) = [[cosθ, -sinθ], [sinθ, cosθ]]</code>，一个向量 v 旋转后变成 <code class="inline-code">v' = R(θ)v</code>。而两个旋转后的向量的点积只取决于原始向量和它们旋转角度的差：<code class="inline-code">⟨R(θ)u, R(φ)v⟩ = ⟨u, R(φ-θ)v⟩</code>。</p>
+
+    <p>接下来是旋转角度 θ 怎么定。旋转角度 <code class="inline-code">θ_i</code> 随着维度 i 变化，通常取 <code class="inline-code">θ_i = 1/10000^(2i/d)</code>。这是一种经验做法，实验证明就算把角度作为参数去训练，在经过一定时间的训练后它的变化也很小，所以干脆就固定了。这样选择 <code class="inline-code">θ_i</code>，可以让不同维度的旋转频率形成几何级数，确保位置编码能够捕捉不同粒度的位置信息。</p>
+
+    <p>写出完整的 RoPE 公式：对于位置 m 的查询向量 <code class="inline-code">q_m</code>，我们计算旋转后的向量 <code class="inline-code">q'_m = R_m q_m</code>，其中 <code class="inline-code">R_m</code> 是一个块对角矩阵，每个 2×2 块是 <code class="inline-code">[[cos mθ_i, -sin mθ_i], [sin mθ_i, cos mθ_i]]</code>；对于位置 n 的键向量 <code class="inline-code">k_n</code>，同理有 <code class="inline-code">k'_n = R_n k_n</code>，把 2 维推广到任意维度即可。</p>
+
+    <p>现在计算它们的点积：<code class="inline-code">⟨q'_m, k'_n⟩ = ⟨R_m q_m, R_n k_n⟩ = ⟨q_m, R_{n-m} k_n⟩</code>，这确实只依赖于相对位置差 m-n。</p>
+
+    <p>那么 RoPE 如何解决外推问题，也就是处理比训练时更长的序列？模型训练时的最大序列长度（比如 4096）是固定的，当推理时遇到更长的文本（比如 8192），超出训练长度的位置编码是模型从未见过的，会导致性能断崖式下降。</p>
+
+    <p>有一个解决思路：将超长序列的位置索引按比例“压缩”到模型训练时的最大长度范围内，让模型能复用训练过的位置编码模式，从而适配更长的文本。假设模型训练时的最大序列长度为 <code class="inline-code">Lmax</code>，推理时的实际序列长度为 <code class="inline-code">Lnew</code>（<code class="inline-code">Lnew &gt; Lmax</code>），那么对任意位置索引 m（<code class="inline-code">0 ≤ m &lt; Lnew</code>），插值后的位置索引 <code class="inline-code">m~</code> 就按这个比例缩放得到。</p>
+
+    <p>RoPE 的旋转角度计算公式原本与隐藏层维度 d、维度索引 i 有关；引入位置插值后，参与旋转的角度改为使用插值后的位置索引来计算。这样变换后依然能保留序列中 token 的相对位置信息，所以解决了外推问题。</p>
+
+    <h2>KV Cache：Attention 机制进阶的核心</h2>
+
+    <p>KV Cache 是一种优化技术，旨在提高模型在推理阶段的效率。它通过缓存键（K）和值（V），减少重复计算，从而加速解码器中的矩阵运算。这种技术在处理大规模语言模型时尤为重要，因为它可以显著减少推理时间，尽管会带来额外的内存开销。后续的 MQA、GQA、MLA 等都是基于 KV Cache 的改进优化。</p>
+
+    <p>在讲解 KV Cache 之前，先明确它三个最重要的核心结论。</p>
+
+    <ul>
+      <li><strong>KV Cache 应用于推理阶段：</strong>它主要用于模型的推理阶段。在这个阶段，键（K）和值（V）的值保持不变，因此可以通过缓存这些值来避免重复计算。</li>
+      <li><strong>KV Cache 只存在于解码器中：</strong>该技术通常应用于解码器部分。这是因为解码器在生成输出时需要进行多次矩阵运算，而 KV Cache 可以显著优化这一过程。</li>
+      <li><strong>KV Cache 会增加内存占用：</strong>尽管它可以加速推理过程，但它也会增加内存的占用，因为需要额外的存储空间来保存缓存的 K 和 V 值。</li>
+    </ul>
+
+    <p>要理解它为什么是推理阶段的核心，需要从显存与计算的权衡看起。在自回归模型中，文本会逐个生成每个 token，这个过程可能比较慢，因为模型一次只能生成一个 token，而且每次新的预测都依赖于之前的上下文。</p>
+
+    <p>这意味着，要预测第 4 个 token，你需要用到前 3 个 token 的信息，这通常涉及对这些 token 的表示进行一系列矩阵乘法运算。当序列长度很大时，例如要预测第 1001 个 token，你不仅需要前 999 个 token 的信息，还要加上第 1000 个 token 的信息，这使得整个 QK 矩阵非常巨大（1000×1000），进而导致 attention 的计算量巨大。</p>
+
+    <p>KV Cache 就是在这里发挥作用：通过存储之前 K、V 的计算结果，并在后续的 token 生成时复用这些结果，从而避免重复计算。在计算过程的示意图里，紫色块会被缓存下来，不需要重复计算。</p>
+
+    <p><strong>为什么只存储 K 和 V，而不存储 Q？</strong></p>
+
+    <p>每生成一个新 token，模型需要用这个新 token 的 Q 去和所有历史 token 的 K 做点积，算出当前 token 和之前所有 token 的注意力权重，然后再和所有历史 token 的 V 加权求和。在这个过程中 Q 只有一个，但 K 和 V 是所有历史 token 的。所以如果不做缓存，每次生成一个新 token，都必须将历史的 token 重新投影计算出 K 和 V。KV Cache 的做法是只计算新 token 的 K 和 V，然后从缓存中获取历史 K 和 V，进行拼接。</p>
+
+    <p><strong>KV Cache 的弊端</strong>在于，它通过牺牲显存换取计算量减少，并非免费加速。以模型参数（40 层、32 注意力头、头维度 128、上下文长度 4096）、fp16 存储为例，单个请求的 KV Cache 大小计算为：<code class="inline-code">40 层 × 32 头 × 4096 位置 × 128 维 × 2（K 和 V）× 2 字节（fp16）≈ 2.5GB</code>。若同时服务 64 个用户，显存占用约 160GB，超过单张 A100（80GB）显存，因此 KV Cache 大小直接限制并发用户数。</p>
+
+    <p><strong>为什么 KV Cache 是推理核心瓶颈？</strong>大模型推理分 prefill 和 decode 两个阶段：prefill 阶段并行处理用户输入生成初始 KV Cache，瓶颈是算力（GPU 越强越快）；decode 阶段每生成一个 token 需从显存读取整个 KV Cache 与当前 query 做注意力计算，此阶段计算量小（单个向量与多个向量点积），但数据搬运量大，GPU 算力利用率低，主要受内存带宽限制。</p>
+
+    <p>因此，KV Cache 是推理系统的核心资源瓶颈，优化方向均围绕减小其显存占用展开，例如 PagedAttention 分页管理减少碎片、多头共享 KV Cache、fp8/int4 低精度存储等，最终目的都是提升系统吞吐量。</p>
+
+    <h2>Prompt Cache</h2>
+
+    <p>KV Cache 是单次请求（单次生成）内部的加速机制，而 Prompt Cache（也常称为 Prefix Caching 或 Prompt Caching）则是 KV Cache 在跨多个请求场景下的扩展和复用。</p>
+
+    <p>很多实际场景中，不同用户、不同请求的<strong> prompt 前缀（prefix）是相同或高度重叠的</strong>，例如相同的 System Prompt、固定的工具描述与 Few-shot 示例、RAG 中的共享文档，以及多轮对话中的历史上下文。传统 KV Cache 每次新请求都要重新计算这个共享前缀的 KV，非常浪费。</p>
+
+    <p><strong>Prompt Cache 的做法</strong>是：当检测到新请求的 <strong>prompt 前缀</strong>与之前处理过的完全相同（通过前缀树匹配）时，直接从内存中<strong>加载之前计算好的 KV 状态</strong>，跳过 Prefill 阶段对该前缀的重复计算；只需对<strong>新增加的独特部分</strong>进行计算，然后继续正常的 Decode（此时再用 KV Cache 加速）。</p>
+
+    <p><strong>Prompt Cache 缓存的内容</strong>同样是 <strong>KV 张量</strong>（Key 和 Value 状态），但它是<strong>针对 prompt 前缀预先计算并持久化</strong>的，可以跨请求、跨用户、跨会话保存（保存在 GPU/CPU 内存或甚至外部存储中，视实现而定）。</p>
+
+    <p>从效果上看，两者解决的问题并不相同：Prompt Cache（提示缓存 / Prefix Caching）主要提高<strong>首 token 生成的速度</strong>（Time To First Token，简称 TTFT）；而 KV Cache（键值缓存）主要提高后续预测下一个 token 的速度（即 Inter-Token Latency 或 decode 阶段的速度）。</p>
+
+    <h2>分组查询注意力 GQA（Group Query Attention）</h2>
+
+    <p><strong>组查询注意力</strong>（GQA）是对 Transformer 中使用的传统多头自注意力机制和多查询注意力机制的折中。在标准多头自注意力中，每个注意力头独立处理整个序列，这种方法虽然功能强大，但计算成本高昂，尤其是对于长序列。而 MQA 虽然通过在多个注意力头之间共享同一组键和值简化了这一过程，但其简化也不可避免地带来了一些精度的损失。GQA 通过将查询分组在一起来解决此问题，从而降低了计算复杂性，而不会显著影响性能。</p>
+
+    <p><strong>1. 标准多头注意力 MHA（原始版）</strong></p>
+
+    <ul>
+      <li><strong>结构：</strong>每个注意力头都有<strong>独立的 Q、K、V 投影</strong>。头数为 <code class="inline-code">H</code>（如 32、64），每个头对应 <code class="inline-code">Q_i, K_i, V_i</code>（<code class="inline-code">i=1..H</code>）。</li>
+      <li><strong>计算：</strong>每个头独立计算 <code class="inline-code">softmax(Q_i K_i^T / √d) V_i</code>，最后拼接输出。</li>
+      <li><strong>问题：</strong>推理时要缓存<strong>所有头的 KV</strong>，长文本 / 大模型下<strong>显存爆炸、带宽瓶颈</strong>。</li>
+    </ul>
+
+    <p><strong>2. 多查询注意力 MQA（极致压缩版）</strong></p>
+
+    <ul>
+      <li><strong>结构：</strong><strong>所有 Q 头共享 1 组 K、V</strong>，仅 Q 保持独立，KV 头数为 <code class="inline-code">1</code>。</li>
+      <li><strong>优势：</strong>KV 缓存缩小 <code class="inline-code">H</code> 倍，推理极快、显存极省。</li>
+      <li><strong>问题：</strong>所有头看同一套 KV，<strong>表达能力下降、效果掉点</strong>。</li>
+    </ul>
+
+    <p><strong>GQA 的核心是分组共享</strong>，也就是在 MHA 与 MQA 之间的灵活折中。一句话原理：把 <code class="inline-code">H</code> 个 Q 头分成 <code class="inline-code">G</code> 组，<strong>每组内的 Q 头共享 1 套 KV</strong>，组间 KV 独立；Q 始终每个头独立。</p>
+
+    <p>关键参数可以一眼看懂：</p>
+
+    <ul>
+      <li><code class="inline-code">H_q</code>：Q 头总数（不变，如 32）。</li>
+      <li><code class="inline-code">H_kv</code>：KV 头数 = 组数 <code class="inline-code">G</code>（如 8）。</li>
+      <li><code class="inline-code">group_size = H_q / H_kv</code>：每组包含的 Q 头数（如 32/8=4）。</li>
+    </ul>
+
+    <p><strong>GQA 的计算流程</strong>可以逐步骤拆解。第一步是投影阶段（输入 → Q/K/V）：</p>
+
+    <ul>
+      <li><strong>Q 投影：</strong>输入 → 全连接 → 拆成 <code class="inline-code">H_q</code> 个独立 Q 头（<code class="inline-code">[B, S, H_q, d]</code>）。</li>
+      <li><strong>K/V 投影：</strong>输入 → 全连接 → 拆成 <code class="inline-code">H_kv</code> 个独立 KV 头（<code class="inline-code">[B, S, H_kv, d]</code>）。</li>
+      <li><strong>重复 KV：</strong>每组内的 KV 复制 <code class="inline-code">group_size</code> 次，匹配 Q 头数量（<code class="inline-code">[B, S, H_q, d]</code>）。</li>
+    </ul>
+
+    <p>第二步是注意力计算（每组内并行）：组内每个 Q 头用<strong>同一套 K_g、V_g</strong> 算注意力，所有组结果拼接，最后过输出投影得到最终输出。</p>
+
+    <p>第三步是推理优化（KV Cache）：只缓存 <code class="inline-code">H_kv</code> 组 KV，而非 <code class="inline-code">H_q</code> 组；显存占用约为 <code class="inline-code">H_kv × 序列长度 × 头维度</code>，比 MHA 省 <code class="inline-code">H_q/H_kv</code> 倍。</p>
+
+    <p><strong>一个细节理解：</strong><code class="inline-code">QK^T</code> 的结果总是 n×n 矩阵，n 是 token 序列长度。因为不论 Q、K 的维度分别被分成多少头，写出形状后 Q 是 <code class="inline-code">[n, dq]</code>、K 是 <code class="inline-code">[n, dk]</code>，结果都是 n×n，Q 和 K 的转置总能相乘；然后与 V 矩阵相乘，V 矩阵是 <code class="inline-code">[n, dv]</code>，所以也是行得通的。也就是说，Q、K、V 分别被分成任意头，逻辑上都是能实现的。</p>
+
+    <h2>LayerNorm 和 RMSNorm</h2>
+
+    <p>归一化的目的是：把神经网络里的数值“压”到一个舒服、稳定的范围里，让训练不炸、不飘、收敛更快，也就是强行稳住每一层的输入分布，让每层都在舒服的区间学习。</p>
+
+    <p><strong>LayerNorm 是什么？</strong>先对比两种常见的归一化方式：</p>
+
+    <ul>
+      <li><strong>BatchNorm：</strong>对<strong>一批样本的同一个特征维度</strong>做归一化（跨样本、同特征）。以 <code class="inline-code">[N, L, D]</code> 为例，它沿着 N（批次）维度归一化，通俗理解就是所有样本的“第 i 个特征”一起算均值 / 方差。</li>
+      <li><strong>LayerNorm：</strong>对<strong>单个样本的所有特征维度</strong>做归一化（同样本、跨特征）。以 <code class="inline-code">[N, L, D]</code> 为例，它沿着 D（特征）维度归一化，通俗理解就是单个样本的“所有特征”一起算均值 / 方差。</li>
+    </ul>
+
+    <p>你可以把数据想象成一个三维张量 <code class="inline-code">[batch_size, seq_len, hidden_dim]</code>（比如 NLP 场景：批次大小、句子长度、词向量维度），两者的归一化维度完全相反。NLP 之所以用 LayerNorm，是因为句子长度不固定，BatchNorm 不好用。</p>
+
+    <p><strong>LayerNorm 公式</strong>方面，给定某一层的输入 x，它做的事情可以概括为一句话：减均值、除标准差、再缩放偏移。其中 <code class="inline-code">μ</code> 是均值，<code class="inline-code">σ</code> 是标准差，<code class="inline-code">γ</code> 和 <code class="inline-code">β</code> 是可学习的缩放与偏移（保证表达能力），<code class="inline-code">ϵ</code> 是一个很小的数，用来防止除 0。</p>
+
+    <p><strong>RMSNorm 是什么？（精简版 LayerNorm）</strong>RMSNorm 的作者发现：<strong>LayerNorm 里“减均值”其实没啥大用，去掉也能稳。</strong>于是去掉<strong>减均值</strong>，只保留<strong>均方根归一化</strong>，从而做到更快、更简单、效果差不多。</p>
+
+    <p>在 <strong>RMSNorm 公式</strong>里，没有 <code class="inline-code">μ</code>，也没有 <code class="inline-code">β</code>（很多实现干脆也省了），只做一件事：<strong>除以均方根 × 缩放</strong>。</p>
+
+    <p><strong>为什么现在大模型都爱 RMSNorm？</strong>主要有三个理由：</p>
+
+    <ul>
+      <li><strong>少算均值，速度更快：</strong>训大模型、长文本，速度很重要。</li>
+      <li><strong>不用均值中心化，依然能稳定训练：</strong>实测在 Transformer 里效果几乎一样。</li>
+      <li><strong>和 RoPE 旋转位置编码更配：</strong>现代架构天然喜欢 RMSNorm。</li>
+    </ul>
+
+    <p><strong>最简总结（面试版）：</strong>LayerNorm 是减均值、除标准差，归一化一个样本内部所有维度；RMSNorm 是去掉均值，只除以均方根，更快更简单；现在大模型（LLaMA 等）基本都用 RMSNorm。</p>
+
+    <h2>涌现能力是什么，是什么原因导致的？</h2>
+
+    <p>这一节的内容参考了火山引擎开发者社区的文章（https://developer.volcengine.com/articles/7528003737760055306）以及一份飞书文档（https://f0jb1v8xcai.feishu.cn/wiki/JPJgwf74ginUjkk0lChcUpRKnGf）。</p>
+
+    <p>在大语言模型中，<strong>涌现能力</strong>指的是：当模型规模（参数、数据、算力）平滑增长时，某个任务的性能在达到一个<strong>临界规模</strong>之前几乎为 0，但超过这个临界点后，性能会<strong>急剧上升</strong>，仿佛突然“涌现”出来。</p>
+
+    <p>这与我们通常认为的“规模越大，性能越好”的<strong>平滑增长</strong>有本质区别：平滑增长是线性的、可预测的；而涌现是非线性的、像阶跃函数一样。</p>
+
+    <p><strong>什么原因导致的？</strong>目前主要有两个猜想。</p>
+
+    <p><strong>猜想一：任务的评价指标不够平滑（评价指标并不是连续的）。</strong>像数学应用题或复杂推理任务，模型在规模较小时，其内部推理链条可能错得离谱，答案完全错误（得 0 分）。随着规模增大，它的推理步骤可能越来越接近正确，但只要最后答案不对，指标上依然是 0 分。直到规模达到某个点，它能完整地、正确地走通整个推理链条，此时指标才从 0 分跳到高分。</p>
+
+    <p><strong>猜想二：复杂任务的成功，要求所有子任务同时都成功。</strong>以复杂任务与子任务的关系为例，我们假设某个任务 T 有 5 个子任务 Sub-T 构成，每个 sub-T 随着模型增长，准确率从 40% 提升到 60%，但是最终任务的准确率却从 1.1% 提升到了 7%（也就是 7 倍）。也就是说，宏观上看到了涌现现象，但是子任务效果其实是平滑增长的。</p>
+
+    <h2>为何现在的大模型大部分是 Decoder-only 结构？</h2>
+
+    <p><strong>zero-shot 能力好：</strong>因为 decoder-only 结构模型在没有任何微调数据的情况下，zero-shot 的表现能力最好。而 encoder-decoder 则需要在一定的标注数据上做 multitask-finetuning 才能够激发最佳性能。</p>
+
+    <p>也就是说，一个 decoder-only 架构的通用模型，在下游任务中、在不给任何例子的情况下表现能力最好；比如让一个通用模型去解决一个情感判断类的任务，它能够完成得最好。而 encoder-decoder 架构的通用模型则需要在这个模型的基础上进行微调才能表现得不错。目前 Large LM 的训练范式还是在大规模语料上做自监督学习，很显然 zero-shot 性能更好的 decoder-only 架构才能更好地利用这些无标注的数据。</p>
+
+    <p><strong>无低秩问题：</strong>大模型使用 decoder-only 架构除了训练效率和工程实现上的优势外，在理论上因为 Encoder 的双向注意力会存在低秩的问题，这可能会削弱模型的表达能力。就生成任务而言，引入双向注意力并无实质的好处。而 Encoder-Decoder 模型架构之所以能够在某些场景下表现更好，大概是因为它多了一倍参数。所以在同等参数量、同等推理成本下，Decoder-only 架构就是最优的选择了。</p>
+
+    <p><strong>为什么 Encoder 的双向注意力会存在低秩的问题？</strong>众所周知，Attention 矩阵一般是由一个低秩分解的矩阵加 softmax 而来，具体来说是一个 n×d 的矩阵与 d×n 的矩阵相乘后再加 softmax（n≫d），这种形式的 Attention 矩阵因为低秩问题而带来表达能力的下降（具体分析可以参考论文《Attention is Not All You Need: Pure Attention Loses Rank Doubly Exponentially with Depth》）。</p>
+
+    <p>而 Decoder-only 架构的 Attention 矩阵是一个下三角阵，注意三角阵的行列式等于它对角线元素之积；由于 softmax 的存在，对角线必然都是正数，所以它的行列式必然是正数，即 Decoder-only 架构的 Attention 矩阵一定是满秩的。满秩意味着理论上有更强的表达能力，也就是说 Decoder-only 架构的 Attention 矩阵在理论上具有更强的表达能力，改为双向注意力反而会变得不足。</p>
+
+    <p>这里补充两个概念：<strong>高秩矩阵</strong>包含丰富的独立信息维度；<strong>低秩矩阵</strong>信息冗余度高，很多维度是其他维度的线性组合。</p>
+
+    <h2>重排序原理</h2>
+
+    <p>关于重排序（Rerank）的原理，本节目前记录的相关参考资料是：https://cloud.tencent.com/developer/article/2588323 。</p>
+
+    <h2>大模型分词器原理</h2>
+
+    <p>分词器的处理流程大致分为几步。第一步是<strong>预处理</strong>：去除无效字符、统一大小写（英文）、添加特殊 token（如句首加 <code class="inline-code">[CLS]</code>）。</p>
+
+    <p>第二步是<strong>子词切分</strong>：通过 Subword 算法切分为 <code class="inline-code">[CLS]</code> + <code class="inline-code">大</code> + <code class="inline-code">模型</code> + <code class="inline-code">分词</code> + <code class="inline-code">器</code> + <code class="inline-code">原理</code>。这种切分的依据是<strong>预训练好的子词合并规则</strong>（由 BPE 等算法在训练阶段生成），而不是简单的固定词典。</p>
+
+    <p>第三步是<strong>查表转 ID</strong>：每个 token 映射为词表中的 ID，比如 <code class="inline-code">[CLS]→101</code>、<code class="inline-code">大→3297</code>、<code class="inline-code">模型→19514</code>……最终得到 ID 序列 <code class="inline-code">[101, 3297, 19514, ...]</code>。</p>
+
+    <p>第四步是<strong>长度处理</strong>：如果序列长度超过模型最大上下文窗口（如 2048、4096），会进行截断；如果不足，会用 <code class="inline-code">[PAD]</code> 填充到固定长度。</p>
+
+    <p>最后是<strong>转向量</strong>：嵌入矩阵（Embedding Matrix）是模型的可训练参数，形状为 <code class="inline-code">[词表大小, 嵌入维度]</code>。每个 Token ID 相当于嵌入矩阵的<strong>行索引</strong>，通过查表（本质是矩阵索引操作）得到对应的词向量，这个过程是<strong>无参数的索引映射</strong>，词向量会在训练中不断更新优化。</p>
+
+    <p>需要特别注意：Tokenizer 的核心职责是<strong>“分词 → 转 Token ID”，不包含</strong>查词向量；而“查词向量”是嵌入层（Embedding Layer）的工作，嵌入层是模型网络组件。</p>
+
+    <h2>Temperature、Top_k、Top_p 的原理</h2>
+
+    <p>先看两个常用的截断策略：<strong>Top-K</strong> 限制候选词数量，使生成内容集中；<strong>Top-P</strong> 控制候选词累积概率，确保合理的候选词动态加入。相关的原理分析可参考：https://blog.csdn.net/shizheng_Li/article/details/146426654 。</p>
+
+    <p>关于 <strong>temperature</strong>，可以先记住两条规律：</p>
+
+    <ul>
+      <li>温度越低 → 概率分布越尖 → 模型越保守、越确定、越重复。</li>
+      <li>温度越高 → 概率分布越平 → 模型越随机、越多样、越敢胡说。</li>
+    </ul>
+
+    <p>具体到不同取值：<code class="inline-code">T=0.1</code>（很小）时，高分词<strong>被极度放大</strong>，几乎只选最高分；<code class="inline-code">T=1.0</code> 时保持原本概率；<code class="inline-code">T=2.0</code>（很大）时，所有词概率<strong>被拉平</strong>，乱选也有可能。</p>
+
+    <p>温度的实现通常发生在 softmax 函数中。softmax 函数将模型的 logits 转换为概率分布，标准形式下直接对 logits 做指数归一化；引入温度 T 后，softmax 函数变为在以 T 缩放后的 logits 上做指数归一化。当 T 越小，会加大每个词之间的差距，导致概率分布更加地尖锐，所以选中某个词就越确定，导致生成结果更保守。</p>
+  </div>
+</body>
+</html>

@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Transformer 原理：编码器、多头注意力与 KV Cache</title>
+  <style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", sans-serif; background: linear-gradient(180deg, #0f172a 0%, #1a1f3a 100%); background-image: linear-gradient(rgba(99, 102, 241, 0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(99, 102, 241, 0.05) 1px, transparent 1px), linear-gradient(180deg, #0f172a 0%, #1a1f3a 100%); background-size: 40px 40px, 40px 40px, 100% 100%; color: #cbd5e1; line-height: 1.75; min-height: 100vh; }
+.article-container { max-width: 820px; margin: 0 auto; padding: 48px 28px; }
+.article-title { color: #e2e8f0; font-size: 2rem; font-weight: 600; line-height: 1.3; margin-bottom: 18px; }
+.article-meta { color: #94a3b8; font-size: 0.95rem; padding-bottom: 20px; margin-bottom: 32px; border-bottom: 1px solid rgba(148, 163, 184, 0.15); }
+.article-container h2 { color: #d1d5db; font-size: 1.5rem; font-weight: 600; margin: 40px 0 18px; }
+.article-container p { margin-bottom: 18px; font-size: 1rem; color: #cbd5e1; }
+.inline-code { background-color: #1e1b4b; color: #c4b5fd; padding: 2px 8px; border-radius: 4px; font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; font-size: 0.92em; }
+.article-container ul { padding-left: 24px; margin-bottom: 18px; }
+.article-container li { margin-bottom: 8px; color: #cbd5e1; }
+.article-container strong { color: #e2e8f0; font-weight: 600; }
+::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar-track { background: rgba(15, 23, 42, 0.5); }
+::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #475569; }
+@media (max-width: 640px) { .article-container { padding: 32px 16px; } .article-title { font-size: 1.6rem; } }
+  </style>
+</head>
+<body>
+  <div class="article-container">
+    <h1 class="article-title">Transformer 原理：编码器、多头注意力与 KV Cache</h1>
+    <div class="article-meta">作者：汤文&nbsp;&nbsp;日期：2025-07-12&nbsp;&nbsp;阅读时长：约 12 分钟</div>
+
+    <p>这一篇把 Transformer 的内部结构拆开来看：从词嵌入与位置编码，到多头注意力里 Q、K、V 的计算过程，再到残差连接、层归一化与解码器中三个注意力模块的分工，最后落到 KV Cache 为什么能加速推理。</p>
+
+    <h2>Transformer 全局图</h2>
+    <p>Transformer 的整体结构可以先从全局图看起：左边是编码器（Encoder），右边是解码器（Decoder），两侧都由若干层结构相同的基本块堆叠而成。整张全局图把输入、注意力、前馈网络、残差与归一化、以及最后的输出预测串成了一条完整的数据流。</p>
+    <p>这篇笔记就是沿着这张全局图逐块展开的，参考资料见 zhuanlan.zhihu.com/p/338817680，值得对照原文中的示意图一起阅读。</p>
+
+    <h2>编码器输入</h2>
+    <p>编码器的第一步是把源句子拆分成 token 再编码，得到一串 embedding 向量列表，每个 token 都对应一个 512 维的向量。这一步只保留了词本身的语义信息，还没有任何关于顺序的信息。</p>
+    <p>因此还要进行位置编码：对于向量列表中的每一个 512 维向量，都做一次相同形式的位置编码，把每个 512 维的向量编码成一个 512 维的位置向量。</p>
+    <p>具体规则是：对每个 512 维向量，向量的偶数位置元素都使用 sin 公式，奇数位置元素都使用 cos 公式。其中 <code class="inline-code">pos</code> 对应于 token 在整个句子中的位置，<code class="inline-code">i</code> 代表这个 token 对应的 embedding 中正在编码的索引，<code class="inline-code">d</code> 代表模型的嵌入维度（这里是 512）。</p>
+    <p>embedding 和位置编码都计算好之后，就把两者相加，作为编码器的输入 <code class="inline-code">X</code>。这样每个位置上的向量既带有词的语义，也带有它在句子中的位置信息。</p>
+    <p>顺带说明一下历史背景：早期的 Encoder 和 Decoder 计算核心以 RNN 为主，而 RNN 的缺点是信息丢失、无法处理较长的句子、不能并行计算。这三条限制正是 Transformer 想要绕开的问题。</p>
+    <p>Transformer 不采用 RNN 的结构，而是使用全局信息，同时也利用单词的顺序信息，这部分信息对于 NLP 来说非常重要。所以 Transformer 中使用位置 Embedding 来保存单词在序列中的相对或绝对位置。</p>
+
+    <h2>多头注意力</h2>
+    <p>多头注意力模块的前向计算大致可以分成五步：线性投影得到 Q、K、V，拆分多头，多头并行计算注意力，合并多头，最后经过线性层输出。</p>
+    <ul>
+      <li><strong>线性投影</strong>：输入分别经过 <code class="inline-code">W_q</code>、<code class="inline-code">W_k</code>、<code class="inline-code">W_v</code> 三个线性层，得到 Q、K、V 三个矩阵，形状均为 <code class="inline-code">[batch_size, seq_len, d_model]</code>。</li>
+      <li><strong>拆分多头</strong>：把投影后的 Q、K、V 按头切分，形状变为 <code class="inline-code">[batch_size, num_heads, seq_len, d_k]</code>，这是整个模块的核心拆分逻辑。</li>
+      <li><strong>多头并行计算</strong>：每个头独立做一次缩放点积注意力，输出形状为 <code class="inline-code">[batch_size, num_heads, seq_len_q, d_k]</code>。</li>
+      <li><strong>合并多头</strong>：先做维度重排，把 <code class="inline-code">num_heads</code> 放回后面，再拼接所有头，把 <code class="inline-code">d_model</code> 维度恢复回来。</li>
+      <li><strong>输出投影</strong>：最后经过 <code class="inline-code">W_o</code> 线性层，得到整个多头注意力模块的输出。</li>
+    </ul>
+    <p>把位置编码向量 position embedding 和 embedding 相加后的结果暂时称为 <code class="inline-code">x</code>。将输入 <code class="inline-code">X</code> 通过 <code class="inline-code">W_q</code>、<code class="inline-code">W_k</code>、<code class="inline-code">W_v</code> 全连接层计算，就得到 Q、K、V，此时的维度是 <code class="inline-code">d_model</code>。</p>
+    <p>接下来把 Q、K、V 分割成 h 个块。比如 h = 8，一般会把 Q、K、V 平均分割成 8 份，每个注意力头处理其中的一份，8 个注意力头并行处理所有的部分，最后再合并起来。</p>
+    <p>Q、K、V 原本是 <code class="inline-code">d_model</code> 维度，被分割后就成为 <code class="inline-code">d_model / 8</code> 维度，但这也不是一定的，切分时也可以有重叠。比如 <code class="inline-code">d_model = 512</code>，平均分成 8 份就是 64；如果允许重叠，那么每一份也可以是 128。</p>
+    <p>被分割成每一份之后就输入到单个注意力模块中处理，每个注意力模块的逻辑完全一致。也就是说，单个注意力模块里看到的 Q、K、V，就是被分割后的 Q、K、V。</p>
+    <p>有了矩阵 Q、K、V 之后，就可以计算 Self-Attention 的输出了，公式可以写成 <code class="inline-code">Attention(Q, K, V) = Softmax(QK^T / sqrt(d_k)) V</code>。其中 <code class="inline-code">d_k</code> 一般也就是 <code class="inline-code">d_model / h</code> 的值，除以 <code class="inline-code">sqrt(d_k)</code> 这一步是为了防止内积过大。</p>
+
+    <h2>为什么要除以 dk 的平方根？</h2>
+    <p>简单说，是为了缓解梯度消失。在注意力机制中，注意力分数的计算是通过 Query 矩阵 Q 和 Key 矩阵 K 的点积实现的，即 <code class="inline-code">S = QK^T</code>。</p>
+    <p>假设 <code class="inline-code">qi</code> 是 Q 中的第 i 行（一个 d 维的向量），<code class="inline-code">kj</code> 是 K 中的第 j 行（同样是 d 维的向量），那么注意力分数矩阵 S 中的元素 <code class="inline-code">sij</code> 就是这两个向量的内积。</p>
+    <p>如果 <code class="inline-code">qi</code> 和 <code class="inline-code">kj</code> 的各个分量是均值为 0、方差为 1 的独立随机变量，那么根据方差的性质，<code class="inline-code">sij</code> 的方差就是 d。</p>
+    <p>也就是说，<code class="inline-code">sij</code> 的方差会随着 d 的增大而增大，这会导致注意力分数矩阵 S 中元素的方差值变得很大。方差大说明数据的分布差距大、很极端，要么很大，要么很小，这样在计算 <code class="inline-code">Softmax(S)</code> 时，它的值会变得很靠近 0 或 1，容易出现梯度消失问题。</p>
+    <p>这里再具体说明为什么会梯度消失。记 <code class="inline-code">Softmax(xi)</code> 为 <code class="inline-code">σi</code>，则 <code class="inline-code">σi</code> 对 <code class="inline-code">xj</code> 的导数可以写成 <code class="inline-code">σi(δij - σj)</code> 的形式。因为 <code class="inline-code">Softmax(S)</code> 的值变得很靠近 0 或 1，根据这个公式可以得知，<code class="inline-code">Softmax(xi)</code> 的导数值会很小、接近 0，这就容易导致梯度消失。</p>
+    <p>而对注意力分数矩阵 S 的值除以 <code class="inline-code">d_k</code> 的平方根，就可以让方差降为 1（因为原来的方差为 <code class="inline-code">d_k</code>，除以 <code class="inline-code">d_k</code> 的平方根后方差就变成了 1）。这样数据分布不会太大，<code class="inline-code">Softmax(S)</code> 的值也不会很接近 0 或 1，梯度也就稳定了。</p>
+
+    <h2>注意力机制的计算</h2>
+    <p>公式中计算矩阵 Q 和 K 每一行向量的内积，为了防止内积过大，因此除以 <code class="inline-code">d_k</code> 的平方根。Q 乘以 K 的转置后，得到的矩阵行列数都为 n，n 为句子中的单词数，这个矩阵可以表示单词之间的 attention 强度，也就是 n 个单词与 n 个单词之间的 attention 强度，所以得到的矩阵是 n × n 的。</p>
+    <p>得到 <code class="inline-code">QK^T</code> 之后，使用 Softmax 计算每一个单词对于其他单词的 attention 系数。公式中的 Softmax 是对矩阵的每一行进行的，即每一行的和都变为 1。</p>
+    <p>得到 Softmax 矩阵之后，就可以和 V 相乘，得到最终的输出 Z。Softmax 矩阵的第 1 行表示单词 1 与其他所有单词的 attention 系数，最终单词 1 的输出 <code class="inline-code">Z1</code> 等于所有单词 i 的值 <code class="inline-code">Vi</code> 根据 attention 系数的比例加在一起，本质就是加权求和。</p>
+    <p>换句话说，加权求和的结果就是把序列里所有词的信息按"重要程度"揉在一起，得到当前词的"上下文表示"。这就是 Self-Attention 输出的 Z 的含义。</p>
+    <p>然后把所有注意力头的结果连接起来：每个 token 会计算出一个 <code class="inline-code">zi</code>，所有 token 计算完后组合得到 <code class="inline-code">Zi</code>；再把每个注意力头模块产生的 <code class="inline-code">Zi</code> 组合起来（也就是连接部分），再经过一个全连接层（参数表示为 <code class="inline-code">W_o</code>），把组合后的矩阵转换成和输入 <code class="inline-code">x</code> 相同的结构。</p>
+    <p>【说明】多头注意力层不会改变输入的形状，一个编码器的输入和输出是相同形状的。经过编码器内部的自注意力层、前馈神经网络层，以及残差连接和层归一化操作后，输出的依然是一个结构相同的列表。这种输入与输出形状的一致性，确保了编码器可以堆叠使用，下层编码器的输出能够直接作为上层编码器的输入。</p>
+
+    <h2>残差和归一化</h2>
+    <p>这一部分对应结构图里的 Add &amp; Normalize 部分。在 Encoder 中，多头注意力模块之后有一个 Add &amp; Norm，在前馈神经网络（FFN）之后也有一个 Add &amp; Norm。</p>
+    <p>Add &amp; Norm 层由 Add 和 Norm 两部分组成，上面两个 Add &amp; Norm 的计算公式可以理解为 <code class="inline-code">LayerNorm(X + MultiHeadAttention(X))</code> 和 <code class="inline-code">LayerNorm(X + FeedForward(X))</code>。其中 X 表示 Multi-Head Attention 或者 Feed Forward 的输入，MultiHeadAttention(X) 和 FeedForward(X) 表示输出，由于输出与输入 X 维度是一样的，所以可以直接相加。</p>
+    <p>Add 指 <code class="inline-code">X + MultiHeadAttention(X)</code>，是一种残差连接，通常用于解决多层网络训练的问题。Norm 则是在相加之后再做一次层归一化，让数值分布保持稳定。</p>
+    <p>前馈神经网络（Feed Forward，或者 FFN）比较简单，是一个两层的全连接层，第一层的激活函数为 ReLU，第二层不使用激活函数。X 是输入，Feed Forward 最终得到的输出矩阵的维度与 X 一致，因此同样可以再接一个残差连接。</p>
+
+    <h2>解码器（Decoder）</h2>
+    <p>Decoder block 的结构与 Encoder block 相似，但是存在一些区别，主要有以下四点。</p>
+    <ul>
+      <li>包含两个 Multi-Head Attention 层。</li>
+      <li>第一个 Multi-Head Attention 层采用了 Masked 操作。</li>
+      <li>第二个 Multi-Head Attention 层的 <strong>K、V</strong> 矩阵使用 Encoder 的<strong>编码信息矩阵 C</strong> 进行计算，而 <strong>Q</strong> 使用上一个 Decoder block 的输出计算。</li>
+      <li>最后有一个 Softmax 层计算下一个翻译单词的概率。</li>
+    </ul>
+
+    <h2>第一个 Multi-Head Attention</h2>
+    <p>Decoder block 的第一个 Multi-Head Attention 采用了 Masked 操作，整个计算过程可以分成五步。</p>
+    <p><strong>第一步</strong>：准备 Decoder 的输入矩阵和 Mask 矩阵。输入矩阵包含 <code class="inline-code">&lt;Begin&gt; I have a cat</code> 这五个单词的表示向量，序号为 0、1、2、3、4；Mask 是一个 5×5 的矩阵。在 Mask 中可以发现，单词 0 只能使用单词 0 的信息，而单词 1 可以使用单词 0、1 的信息，即只能使用之前的信息。Mask 矩阵会在第三步用到。</p>
+    <p><strong>第二步</strong>：接下来的操作和之前的 Self-Attention 一样，通过输入矩阵 X 计算得到 Q、K、V 矩阵，然后计算 Q 和 <code class="inline-code">K^T</code> 的乘积 <code class="inline-code">QK^T</code>。<code class="inline-code">QK^T</code> 表示的是 n 个单词与 n 个单词之间的 attention 强度，其 [i, j] 元素表示的是第 i 个单词对第 j 个单词的 attention 强度。</p>
+    <p><strong>第三步</strong>：在得到 <code class="inline-code">QK^T</code> 之后需要进行 Softmax，计算 attention score。在 Softmax 之前需要使用 Mask 矩阵遮挡住每一个单词之后的信息。</p>
+    <p>遮挡操作是按位相乘，而不是矩阵相乘：<code class="inline-code">QK^T</code> 矩阵的 [i, j] 元素与 Mask 矩阵的 [i, j] 元素相乘，这样得到的就是掩码后的矩阵。掩码之后，第 i 个单词只能关注到自己及之前的单词了。</p>
+    <p>得到 Mask <code class="inline-code">QK^T</code> 之后，再在其上做 Softmax，每一行的和都为 1，但单词 0 在单词 1、2、3、4 上的 attention score 都为 0。</p>
+    <p><strong>第四步</strong>：使用 Mask <code class="inline-code">QK^T</code> 与矩阵 V 相乘，得到输出 Z，则单词 1 的输出向量 <code class="inline-code">Z1</code> 是只包含单词 1 信息的。</p>
+    <p><strong>第五步</strong>：通过上述步骤就可以得到一个 Mask Self-Attention 的输出矩阵 <code class="inline-code">Zi</code>，然后和 Encoder 类似，通过 Multi-Head Attention 拼接多个输出 <code class="inline-code">Zi</code>，进而计算得到第一个 Multi-Head Attention 的输出 <strong>Z</strong>，<strong>Z</strong> 与输入 <strong>X</strong> 维度一样。</p>
+
+    <h2>第二个 Multi-Head Attention</h2>
+    <p>Decoder block 第二个 Multi-Head Attention 变化不大，主要的区别在于其中 Self-Attention 的 <strong>K、V</strong> 矩阵不是使用上一个 Decoder block 的输出计算的，而是使用 <strong>Encoder 的编码信息矩阵 C</strong> 计算的。</p>
+    <p>根据 Encoder 的输出 <strong>C</strong> 计算得到 <strong>K、V</strong>（把 C 经过 <code class="inline-code">W_k</code>、<code class="inline-code">W_v</code> 全连接层计算得到 K、V），根据上一个 Decoder block 的输出 <strong>Z</strong> 计算 <strong>Q</strong>（经过 <code class="inline-code">W_q</code> 计算得到 Q）。如果是第一个 Decoder block，则使用输入矩阵 <strong>X</strong> 进行计算。后续的计算方法与之前描述的一致。注意：Encoder 输出计算得到的是 K、V，而不是 Q、K。</p>
+    <p>从编码器来的 K 和 V 会被传递给解码组件中每一个解码器的 Encoder-Decoder Attention 模块。这样做的好处是，在 Decoder 的时候，每一位单词都可以利用到 Encoder 所有单词的信息，而且这些信息无需 <strong>Mask</strong>。</p>
+
+    <h2>Softmax 预测输出单词</h2>
+    <p>对于最后一个 Decoder block 的输出 <code class="inline-code">[batch_size, seq_n, d_model]</code>，通过一个线性层把输出转为 <code class="inline-code">[batch_size, seq_n, vocab_size]</code>，再通过 Softmax 预测转为概率分布，通过概率分布预测下一个单词。这里会得到多个概率分布，其实在推理时只取最后一个概率分布，而在训练时都需要。</p>
+    <p>先说训练阶段：<code class="inline-code">seq_len</code> 等于完整目标序列的长度，这是核心原因。Transformer 训练时采用<strong>并行计算（Teacher Forcing）</strong>，而非逐 token 生成。</p>
+    <ul>
+      <li><strong>输入</strong>：目标序列的"前缀"，比如 <code class="inline-code">&lt;sos&gt; 我 爱</code>。</li>
+      <li><strong>标签</strong>：目标序列的"后缀"，比如 <code class="inline-code">我 爱 &lt;eos&gt;</code>。</li>
+      <li><strong>计算</strong>：Decoder 一次性处理整个前缀序列，输出所有位置（我、爱、<code class="inline-code">&lt;eos&gt;</code>）的概率分布，形状为 <code class="inline-code">[batch_size, 3, vocab_size]</code>。</li>
+    </ul>
+    <p>而在推理时，<code class="inline-code">seq_len</code> 初始为 1（只生成第 1 个 token），之后每生成一个 token，<code class="inline-code">seq_len</code> 就加 1，直到生成结束符。</p>
+    <p>为什么要这么做？原因有两点。</p>
+    <ul>
+      <li><strong>效率更高</strong>：一次性计算所有位置的损失，比逐 token 计算快得多。</li>
+      <li><strong>标签对齐</strong>：每个位置的预测结果可以直接和标签对比，计算交叉熵损失。</li>
+    </ul>
+    <p>再看推理阶段：<code class="inline-code">seq_len</code> 从 1 开始逐步增长。推理时没有标签，必须逐 token 生成。每次推理的输入序列长度等于当前已生成的 token 数，比如生成第 2 个 token 时，输入是 <code class="inline-code">&lt;sos&gt; 我</code>，长度为 2。</p>
+    <p>Decoder 的输出形状始终是 <code class="inline-code">[batch_size, 当前 seq_len, vocab_size]</code>，但我们只关注<strong>最后一个位置</strong>的概率分布，因为前序位置的预测已无意义。所以推理的时候可以使用 KV Cache 优化，这样让输出为 <code class="inline-code">[batch_size, 1, vocab_size]</code>。</p>
+    <p>先明确两种方式的输出形状差异。假设要生成一个长度为 <code class="inline-code">L</code> 的序列（比如生成 5 个 token），<code class="inline-code">batch_size = 1</code>，<code class="inline-code">vocab_size = 10000</code>。</p>
+    <p><strong>方式 1：不用 KV Cache（整序列输入，低效）</strong></p>
+    <ul>
+      <li><strong>输入</strong>：一次性输入完整的 <code class="inline-code">L</code> 长度序列（比如训练时的输入），经过 <code class="inline-code">W_k</code>、<code class="inline-code">W_q</code>、<code class="inline-code">W_v</code> 的全连接层后得到 Q、K、V，形状为 <code class="inline-code">[batch_size, L, d_model]</code>。</li>
+      <li><strong>模型输出</strong>：<code class="inline-code">[batch_size, L, vocab_size]</code>，即 <code class="inline-code">[1, 5, 10000]</code>。</li>
+      <li><strong>含义</strong>：一次性给出每个位置 token 的概率分布（训练场景），但只用考虑最后一个 token 的概率分布。</li>
+    </ul>
+    <p><strong>方式 2：用 KV Cache（逐 token 生成，实际推理）</strong></p>
+    <ul>
+      <li><strong>输入</strong>：每次只输入最新生成的 1 个 token，经过 <code class="inline-code">W_k</code>、<code class="inline-code">W_q</code>、<code class="inline-code">W_v</code> 的全连接层后得到 Q、K、V，形状为 <code class="inline-code">[batch_size, 1, d_model]</code>；但 K、V 要通过缓存找到历史 K、V，拼接后 K、V 形状为 <code class="inline-code">[batch_size, n, d_model]</code>。</li>
+      <li><strong>模型输出</strong>：每次输出 <code class="inline-code">[batch_size, 1, vocab_size]</code>，即 <code class="inline-code">[1, 1, 10000]</code>。</li>
+      <li><strong>生成 L 个 token 的过程</strong>：需要循环 L 次，每次输出 1 个 token 的概率分布。</li>
+    </ul>
+    <p><strong>总结 1</strong>：Decoder 的输出的形状与 Q 的形状有关，如果 Q 的形状是 <code class="inline-code">[batch_size, n, d_model]</code>，那么输出的结果的形状是 <code class="inline-code">[n, vocab_size]</code>。所以 KV Cache 通过只将最新输出的 token 作为下一轮预测的输入，然后在计算 K、V 时拼接上缓存中的历史 K、V。这样可以加快计算速度，但增加了内存空间的使用。</p>
+    <p><strong>总结 2</strong>：推理时（用 KV Cache），Decoder 每一轮的<strong>模型输入</strong>确实只有上一轮生成的那个 token，不会拼接历史 token，但历史 token 的信息并没有丢失，而是通过 <strong>KV Cache 缓存的 K、V 矩阵</strong>传递给模型，而非通过输入序列本身。</p>
+
+    <h2>KV Cache：Attention 机制进阶的核心</h2>
+    <p>KV Cache 是一种优化技术，旨在提高模型在推理阶段的效率。它通过缓存键（K）和值（V）的值，减少重复计算，从而加速解码器中的矩阵运算。这种技术在处理大规模语言模型时尤为重要，因为它可以显著减少推理时间，尽管会带来额外的内存开销。后续的 MQA、GQA、MLA 等都是基于 KV Cache 的改进优化。</p>
+    <p>在讲解 KV Cache 之前，首先明确其三个最重要的核心。</p>
+    <ul>
+      <li><strong>KV Cache 应用于推理阶段</strong>：KV Cache 主要用于模型的推理阶段。在这个阶段，键（K）和值（V）的值保持不变，因此可以通过缓存这些值来避免重复计算。</li>
+      <li><strong>KV Cache 只存在于解码器中</strong>：KV Cache 技术通常应用于解码器部分。这是因为解码器在生成输出时需要进行多次矩阵运算，而 KV Cache 可以显著优化这一过程。</li>
+      <li><strong>KV Cache 会增加内存占用</strong>：尽管 KV Cache 可以加速推理过程，但它也会增加内存的占用。这是因为需要额外的存储空间来保存缓存的 K 和 V 值。</li>
+    </ul>
+    <p>在自回归模型（autoregressive models）中，会逐个生成文本的每个 token，这个过程可能比较慢，因为模型一次只能生成一个 token，而且每次新的预测都依赖于之前的上下文。这意味着，要预测第 4 个 token，你需要用到前 3 个 token 的信息，这通常涉及到对这些 token 的表示进行一系列矩阵乘法运算。</p>
+    <p>当序列长度很大时，例如要预测第 1001 个 token，你不仅需要前 999 个 token 的信息，还要加上第 1000 个 token 的信息，这使得整个 QK 矩阵非常巨大（1000×1000），进而导致 attention 的计算量巨大。KV Cache 就是在这里发挥作用：通过存储之前 K、V 的计算结果，并在后续的 token 生成时复用这些结果，从而避免重复计算。</p>
+    <p>为什么只存储 K 和 V，而不存储 Q？</p>
+    <ul>
+      <li>由于 Q 是当前时间步的输入，每次生成新 token 时，Q 都不一样，都会重新计算 Q，不需要缓存。</li>
+      <li>而 K 和 V 可以复用之前时间步的计算结果，通过缓存 K 和 V，可以避免在每个时间步重新计算它们，从而提升效率。</li>
+    </ul>
+
+    <h2>Transformer 总结</h2>
+    <ul>
+      <li>Transformer 与 RNN 不同，可以比较好地并行训练。</li>
+      <li>Transformer 本身是不能利用单词的顺序信息的，因此需要在输入中添加位置 Embedding，否则 Transformer 就是一个词袋模型了。</li>
+      <li>Transformer 的重点是 Self-Attention 结构，其中用到的 <strong>Q、K、V</strong> 矩阵通过输出进行线性变换得到。</li>
+      <li>Transformer 中 Multi-Head Attention 中有多个 Self-Attention，可以捕获单词之间多种维度上的相关系数 attention score。</li>
+    </ul>
+
+    <h2>整体网络架构中的 CrossAttnBlock</h2>
+    <p>整体网络架构的代码以一个交叉注意力块 <code class="inline-code">CrossAttnBlock</code> 为例，它的主要组成可以概括为下面几点。</p>
+    <ul>
+      <li><strong>前置 LayerNorm</strong>：默认采用前置归一化（<code class="inline-code">post_norm</code> 为假），先对 query 和 key 分别做 LayerNorm 再送入注意力，让交叉注意力聚焦于特征的语义关联，而非"哪个分支的数值更大"；如果选择后置归一化，则在最后统一做一次 LayerNorm，此时前面的两个归一化退化为恒等映射。</li>
+      <li><strong>交叉注意力</strong>：query 和 key 来自不同分支，注意力模块返回注意力输出 <code class="inline-code">attn_v</code> 以及注意力距离矩阵 <code class="inline-code">dis_attn</code>，并支持传入 mask。</li>
+      <li><strong>门控参数</strong>：模块中定义了 <code class="inline-code">gate_attn</code> 和 <code class="inline-code">gate_dense</code> 两个可学习参数，初值都是 0.0；当 <code class="inline-code">is_tanh</code> 为真时，用 <code class="inline-code">tanh(gate_attn)</code> 和 <code class="inline-code">tanh(gate_dense)</code> 分别对注意力输出与 MLP 输出加权，相当于给两条分支加上可学习的缩放系数。</li>
+      <li><strong>残差连接与 MLP</strong>：注意力输出先与输入 query 做残差相加，随后经过 LayerNorm 和多层感知机（MLP）再做一次残差相加，两次相加都用 DropPath 控制随机深度。</li>
+      <li><strong>返回值</strong>：最终返回归一化后的输出 <code class="inline-code">x</code> 以及注意力距离矩阵 <code class="inline-code">dis_attn</code>，供后续模块使用。</li>
+    </ul>
+  </div>
+</body>
+</html>

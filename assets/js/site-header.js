@@ -11,7 +11,6 @@
     headerClass: 'header-top',
     active: '',
     basePath: '',
-    resumeUrl: 'https://drive.google.com/file/d/1pT-Nk6AxY9ZOWBizuDb4htA3IiUF_fSe/view?usp=sharing',
     socialLinks: [
       { href: 'https://www.linkedin.com/in/rajaprerak', className: 'linkedin', icon: 'bxl-linkedin' },
       { href: 'https://www.github.com/rajaprerak', className: 'github', icon: 'bxl-github' },
@@ -26,7 +25,7 @@
     { key: 'projects', label: 'Projects', path: 'pages/Blog.html' },
     { key: 'moments', label: 'Moments', path: 'pages/Moments.html' },
     { key: 'photo', label: 'Photo', path: 'pages/photo.html' },
-    { key: 'resume', label: 'Resume', external: true }
+    { key: 'resume', label: 'Resume', path: 'docs/汤文-武汉理工大学.pdf', newTab: true }
   ];
 
   function escapeHtml(value) {
@@ -122,8 +121,8 @@
   function renderNav(activeKey, basePath) {
     return navItems.map(function (item) {
       var isActive = item.key === activeKey ? ' class="active"' : '';
-      var href = item.external ? defaults.resumeUrl : resolveHref(item.path, basePath);
-      var target = item.external ? ' target="_blank"' : '';
+      var href = item.external ? item.path : resolveHref(item.path, basePath);
+      var target = (item.external || item.newTab) ? ' target="_blank"' : '';
 
       return '<li' + isActive + '><a href="' + escapeHtml(href) + '"' + target + '><span>' + escapeHtml(item.label) + '</span></a></li>';
     }).join('');

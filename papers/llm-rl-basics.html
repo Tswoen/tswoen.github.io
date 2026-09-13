@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>强化学习基础与 RLHF：策略、价值函数与奖励模型</title>
+  <style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", sans-serif; background: linear-gradient(180deg, #0f172a 0%, #1a1f3a 100%); background-image: linear-gradient(rgba(99, 102, 241, 0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(99, 102, 241, 0.05) 1px, transparent 1px), linear-gradient(180deg, #0f172a 0%, #1a1f3a 100%); background-size: 40px 40px, 40px 40px, 100% 100%; color: #cbd5e1; line-height: 1.75; min-height: 100vh; }
+.article-container { max-width: 820px; margin: 0 auto; padding: 48px 28px; }
+.article-title { color: #e2e8f0; font-size: 2rem; font-weight: 600; line-height: 1.3; margin-bottom: 18px; }
+.article-meta { color: #94a3b8; font-size: 0.95rem; padding-bottom: 20px; margin-bottom: 32px; border-bottom: 1px solid rgba(148, 163, 184, 0.15); }
+.article-container h2 { color: #d1d5db; font-size: 1.5rem; font-weight: 600; margin: 40px 0 18px; }
+.article-container p { margin-bottom: 18px; font-size: 1rem; color: #cbd5e1; }
+.inline-code { background-color: #1e1b4b; color: #c4b5fd; padding: 2px 8px; border-radius: 4px; font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; font-size: 0.92em; }
+.article-container ul { padding-left: 24px; margin-bottom: 18px; }
+.article-container li { margin-bottom: 8px; color: #cbd5e1; }
+.article-container strong { color: #e2e8f0; font-weight: 600; }
+::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar-track { background: rgba(15, 23, 42, 0.5); }
+::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #475569; }
+@media (max-width: 640px) { .article-container { padding: 32px 16px; } .article-title { font-size: 1.6rem; } }
+  </style>
+</head>
+<body>
+  <div class="article-container">
+    <h1 class="article-title">强化学习基础与 RLHF：策略、价值函数与奖励模型</h1>
+    <div class="article-meta">作者：汤文&nbsp;&nbsp;日期：2025-07-30&nbsp;&nbsp;阅读时长：约 9 分钟</div>
+
+    <p>预训练只决定了模型的底子，后训练才决定它好不好用。而在讨论 RLHF、PPO 之前，得先把强化学习的地基补齐：为什么监督学习在这里不够用、策略与 Q 函数各自定义了什么、贝尔曼方程到底在描述什么，以及微调与强化学习在优化目标上的根本差异。</p>
+
+    <h2>监督学习的不足，为什么需要强化学习</h2>
+    <p>监督学习需要事先准备好数据，也就是一组 X 到 Y 的映射，然后在标注数据上学习这个映射。但在某些环境中，这样一组 X 到 Y 并不能很好地得到，一个典型的例子是训练直升机自动飞行，并且保证它不坠毁。</p>
+    <p>如果使用监督学习，就需要这样一个数据集：当前状态到下一步最佳操作，也就是当直升机处于某一个状态时，下一步最佳的操作是什么，是向左倾斜还是向右倾斜。这个数据集很难确定，因为很难确定什么才算是一个最佳方案，而且一般有很多种合适的方案，因此很难找到合适的 X 到 Y 这样的映射关系。</p>
+    <p>所以对于这种场景，传统的监督学习取得的效果很不好，于是就有了强化学习。</p>
+
+    <h2>什么是强化学习</h2>
+    <p>强化学习（Reinforcement learning，RL）讨论的问题是一个<strong>智能体</strong>(agent) 怎么在一个复杂不确定的<strong>环境</strong>(environment) 里面去极大化它能获得的奖励。</p>
+    <p>它通过感知所处环境的<strong>状态</strong>(state) 对<strong>动作</strong>(action) 的<strong>反应(reward)</strong>，来指导更好的动作，从而获得最大的<strong>收益(return)</strong>，这被称为在交互中学习，这样的学习方法就被称作强化学习。</p>
+    <p>这套交互可以用一个五元组来描述：<code class="inline-code">(s, a, R(s), s')</code>，依次对应 (当前状态，下一步动作，当前状态对应的奖励，下一步的状态)。</p>
+
+    <h2>强化学习中的回报</h2>
+    <p>强化学习中的回报要解决的核心问题是：<strong>平衡早期回报和长期利益</strong>。也就是说，不能只看眼前一步能拿到多少奖励，还要考虑这一步之后能不能带来更好的长期收益。</p>
+
+    <h2>策略</h2>
+    <p>策略写作 <code class="inline-code">π(s)</code>：输入一个状态 s，得到下一个动作 a。它帮助你选择动作，以获得最大回报。</p>
+
+    <h2>Q(s,a)函数</h2>
+    <p><code class="inline-code">Q(s,a)</code> 函数即状态-动作价值函数：在状态 s，采取行动 a，可获得的最大回报。</p>
+
+    <h2>贝尔曼方程</h2>
+    <p>贝尔曼方程描述的是当前状态的价值与下一步状态的价值之间的递归关系。它的各个符号含义如下：</p>
+    <ul>
+      <li><code class="inline-code">s</code>：当前状态。</li>
+      <li><code class="inline-code">a</code>：当前选择的动作。</li>
+      <li><code class="inline-code">s'</code>：采取了动作 a 后，达到的状态。</li>
+      <li><code class="inline-code">a'</code>：在状态 <code class="inline-code">s'</code> 选择的动作。</li>
+      <li><code class="inline-code">R(s)</code>：当前状态对应的奖励。</li>
+    </ul>
+    <p>用一句话概括这层关系：在状态 s 采取动作 a 的价值，等于当前状态带来的奖励 <code class="inline-code">R(s)</code>，再加上到达 <code class="inline-code">s'</code> 之后所能取得的最优后续价值。</p>
+
+    <h2>连续状态空间</h2>
+    <p>连续状态空间意味着状态不再是离散可枚举的几个取值，而是连续变化的量，这使状态与动作的组合无法被逐一列出，也让价值函数的表示与求解变得更加困难。</p>
+
+    <h2>基于人类反馈的强化学习（RLHF）与 LLM 微调</h2>
+
+    <p>这一部分先把大模型的训练流程摊开，看清预训练、中训练、后训练各自负责什么，再对比微调与强化学习在优化目标上的差别，最后落到奖励模型该怎么训练。</p>
+
+    <h2>LLM训练过程</h2>
+    <p>大模型训练的过程可以概括为三个阶段：预训练 → 中训练 → 后训练。</p>
+    <ul>
+      <li><strong>预训练</strong>：用互联网中的大量文本进行训练，其中有高质量的也有低质量的内容，没有具体目标。</li>
+      <li><strong>中训练</strong>：使用精选的内容有针对性地训练模型在新语言、新领域中的能力，或者扩展上下文的长度。</li>
+      <li><strong>后训练</strong>：可采用微调和强化学习，模型开始学习成为一名高效的导师，比如如何清楚地回答问题，如何礼貌互动，总之就是让模型不仅能回答问题，而且能很好地回答问题，符合人类预期地回答问题。</li>
+    </ul>
+
+    <h2>微调和强化学习区别</h2>
+    <p><strong>微调</strong>：让模型输出的内容尽可能地贴合标注数据的内容。重点是模仿，所以稳定；对于微调而言，关键在于数据。</p>
+    <p><strong>强化学习</strong>：模型的输出内容不重要，只要能被评分并获得奖励就可以，通过这个奖励来判断输出是否优秀。它只看结果，过程如何不重要，所以不太稳定，但有时能出乎意料地好，甚至超越人类；对于强化学习而言，关键在于评分机制。</p>
+    <p>与微调不同，强化学习是数据收集到训练、再回到数据收集再训练的循环，并不是先收集所有数据再训练。它需要大量的输入，但没有目标输出。</p>
+    <p>这种评分通过验证器或者奖励模型来给出。验证器适合客观性任务，如事实正确性；奖励模型适合主观性较强的任务，如人类价值对齐。</p>
+
+    <h2>如何训练一个奖励模型</h2>
+    <p>训练奖励模型通常使用 <strong>Bradley-Terry 模型</strong>等配对比较模型，具体流程如下：</p>
+    <ul>
+      <li>让模型对同一个输入输出多个结果 A、B、C、D。</li>
+      <li>人工对这些结果进行排名，排名越高，代表结果越好，比如第一名到第四名分别为 A、B、C、D。</li>
+      <li>现在构造偏好对：(A,B)、(A,C)、(A,D)、(B,C)、(B,D)、(C,D)。</li>
+      <li>利用 Bradley-Terry 公式得到损失函数。</li>
+    </ul>
+    <p>对上面构造损失函数的过程的解释：选择一个偏好对，让奖励模型对 A 和 B 进行预测奖励值 <code class="inline-code">r(A)</code> 和 <code class="inline-code">r(B)</code>，再做减法（用偏好的减不被偏好的），再对其使用 sigmoid 函数，最后取负对数。这样就构成了一个损失函数。</p>
+    <p>最小化这个损失等价于<strong>最大化人类偏好选择的可能性</strong>，即让奖励模型给「好」样本的评分显著高于「坏」样本。</p>
+  </div>
+</body>
+</html>

@@ -62,48 +62,84 @@
 <section id="experience" class="services section-show">
     <div class="container">
       <div class="section-title">
-        <h2>工作与研究经历</h2>
+        <h2>实习、项目与教育经历</h2>
       </div>
       <div class="row">
           <div class="col-lg-12" data-aos="fade-up">
+              <h3 style="text-align:left;color:#12d640;font-size:20px;font-weight:600;margin:10px 10px 4px;">实习经历</h3>
               <div class="col-md-12 mt-4 mt-md-0 icon-box" data-aos="fade-up" data-aos-delay="100">
-                <h4 style="text-align:left;"><a href="#" style="color:#12d640">沃太能源股份有限公司</a><br> </h4>
-                <h5 style="text-align:left;">2026年6月 - 至今</h5>
-                <p style="text-align:left;color:#fff"><em>AI战略实习生</em></p>
+                <h4 style="text-align:left;"><a href="#" style="color:#12d640">中兴通讯股份有限公司</a><br> </h4>
+                <h5 style="text-align:left;">2026年6月 - 2026年9月</h5>
+                <p style="text-align:left;color:#fff"><em>数字能源研发部 · AI应用开发实习生</em></p>
                 <ul style="text-align:left;">
-                  <li>统筹全部门业务调研与AI场景挖掘，走访多业务线梳理真实痛点，输出优先级落地规划，支撑公司AI大赛与项目立项；搭建Alpha结构化知识库，对分散文档做标准化分类整理，构建可复用的知识底座</li>
-                  <li>主导储能产品故障问答智能体研发，采用RAG混合检索+反馈闭环架构，沉淀故障排查知识体系，降低工程师经验依赖与跨部门沟通成本</li>
-                  <li>研发储能产品智能体检Agent，基于LangGraph构建端到端工作流，自动完成时序数据分析、异常诊断与可视化报告生成，替代人工重复分析工作</li>
-                  <li>设计服务台智能升级双技术方案，补充知识缺失预警与内容回流闭环能力，兼顾MVP快速验证与长期扩展性</li>
+                  <li><strong>实习简介：</strong>负责企业内部AI自动化工具的设计与开发，支撑研发协作、安全评审、技术情报分析等场景。</li>
+                  <li><strong>技术栈：</strong>Python、Skills、SubAgent、MySQL、Agent Memory、Playwright-cli</li>
+                  <li><strong>漏洞二次定级自动化：</strong>基于Skill、Playwright、REST API、代码扫描和AI决策树搭建16步CVE定级流程，替代跨7套系统的人工查询、判断和录入，单条处理效率提升约10倍。</li>
+                  <li><strong>情报助手开发：</strong>使用定时采集、信息去重、质量评估、知识入库和邮件推送链路实现多源技术情报自动沉淀，通过配置化规则与失败重试降低人工整理成本。</li>
+                  <li><strong>LLMIO VS Code插件设计：</strong>基于VS Code插件、WebView、SQL权限表实现API-Key申领与模型权限管理，落地4层认证降级、请求幂等和缓存复用，提升内网可用性。</li>
+                  <li><strong>成果收获：</strong>接触并实践5+ Skill流程编排、智能体开发和VS Code插件开发，对内部业务系统的架构设计、权限治理与生产交付建立体系化认知。</li>
+                </ul>
+              </div>
+              <h3 style="text-align:left;color:#12d640;font-size:20px;font-weight:600;margin:28px 10px 4px;">项目经历</h3>
+              <div class="col-md-12 mt-4 mt-md-0 icon-box" data-aos="fade-up" data-aos-delay="100">
+                <h4 style="text-align:left;"><a href="#" style="color:#12d640">多智能体论文调研报告生成系统</a><br> </h4>
+                <h5 style="text-align:left;">2025年11月 - 至今</h5>
+                <p style="text-align:left;color:#fff"><em>核心开发者 · 开源项目</em></p>
+                <ul style="text-align:left;">
+                  <li><strong>项目地址：</strong><a href="https://github.com/Tswoen/Paper-Agent" target="_blank" rel="noopener" style="color:#12d640">github.com/Tswoen/Paper-Agent</a>　⭐ Stars 400+ ｜ Forks 44</li>
+                  <li><strong>技术栈：</strong>Python、FastAPI、LangGraph、Agent Loop、Tool-Calling、Few-shot、RAG</li>
+                  <li><strong>项目背景：</strong>针对跨领域文献调研耗时久、证据难以溯源、长任务易中断等痛点，搭建论文调研Agent Runtime；基于LangGraph构建可恢复工作流，拆分检索、精读、分析、大纲与分节写作环节，实现从主题输入到综述产出的端到端自动化。</li>
+                  <li><strong>多Agent架构设计：</strong>将论文调研拆为检索规划、论文阅读、研究分析、大纲生成、证据写作五类职责Agent，通过阶段协作与审核反馈降低单Agent职责耦合和长流程输出漂移。</li>
+                  <li><strong>上下文与压缩机制：</strong>围绕长文献综述的Token压力，设计优先提炼摘要、全文分块、按需提取原文证据的上下文流转机制，将论文材料逐层压缩为结构化摘要、子主题分析和全局框架。</li>
+                  <li><strong>容错机制设计：</strong>面向模型异常、解析失败、全文处理失败和用户中断等不确定场景，落地阶段级恢复、结构化输出重试、工具调用上限和结果持久化机制，减少小时级任务整体重跑。</li>
+                  <li><strong>监控与评测闭环：</strong>建设长任务运行观测链路，记录SSE实时进度、Token用量、阶段产物和异常信息，并用单元测试覆盖检索、阅读、写作、恢复续跑与前后端联调场景。</li>
+                  <li><strong>项目成果：</strong>开源项目累计Stars 400+、Forks 44；项目具备可恢复、可观测、可证据追踪能力，支持检索、阅读、分析、写作多阶段产物持久化与异常续跑；通过结构化摘要、分块取证、审核修订降低长文献综述中的幻觉和引用错配风险；60篇文献综述由人工约2周/份缩短至约1小时/份。</li>
                 </ul>
               </div>
               <div class="col-md-12 mt-4 mt-md-0 icon-box" data-aos="fade-up" data-aos-delay="100">
-                <h4 style="text-align:left;"><a href="#" style="color:#12d640">国家超级计算长沙中心</a><br> </h4>
-                <h5 style="text-align:left;">2025年7月 - 2026年6月</h5>
-                <p style="text-align:left;color:#fff"><em>研究生（课题研究）</em></p>
+                <h4 style="text-align:left;"><a href="#" style="color:#12d640">复杂约束条件下的文本属性抽取（天池CCKS2026竞赛）</a><br> </h4>
+                <h5 style="text-align:left;">2026年6月 - 2026年8月</h5>
+                <p style="text-align:left;color:#fff"><em>团队队长 · 🏆 竞赛排名 21/247</em></p>
                 <ul style="text-align:left;">
-                  <li>从事智慧医疗方向课题研究，主攻心电图智能诊断领域，发表相关学术论文1篇</li>
-                  <li>设计跨模态心电图编码器，采用知识蒸馏方案训练分类器，9类心脏病测试集准确率达96.6%，44类准确率达94.5%</li>
-                  <li>搭建端到端多模态心电解读智能体，完成大模型LoRA微调、领域知识图谱构建与双层检索体系设计，心电基准测试得分85.4%，可自动输出完整诊断报告</li>
+                  <li><strong>项目地址：</strong><a href="https://github.com/Tswoen/Just-Do-It" target="_blank" rel="noopener" style="color:#12d640">github.com/Tswoen/Just-Do-It</a></li>
+                  <li><strong>技术栈：</strong>Python、LLM Agent、LoRA-SFT、vLLM、Qwen、PEFT、Transformers</li>
+                  <li><strong>项目背景：</strong>CCKS2026信息抽取竞赛，面向长文本复杂约束场景，从英文文本完成条件属性抽取并结构化输出，考验大模型语义理解与生成式抽取能力。</li>
+                  <li><strong>数据集防泄露：</strong>按case维度切分训练、验证集，固定实验划分策略，规避跨集合数据泄露，保障训练、调参、评测结果可复现。</li>
+                  <li><strong>SFT微调：</strong>基于Qwen3-4B开展LoRA轻量化微调，仅对答案部分做监督训练，提升约束抽取任务适配能力。</li>
+                  <li><strong>评测闭环：</strong>采用生成式Micro-F1评估回调，依据F1保存最优Adapter并启用早停，实现训练评估调参闭环。</li>
+                  <li><strong>策略优化：</strong>采用贪心+多轮采样投票生成候选结果，通过阈值调优抑制采样噪声，平衡抽取任务精度与召回。</li>
                 </ul>
               </div>
               <div class="col-md-12 mt-4 mt-md-0 icon-box" data-aos="fade-up" data-aos-delay="100">
-                <h4 style="text-align:left;"><a href="#" style="color:#12d640">郑州大学</a><br> </h4>
+                <h4 style="text-align:left;"><a href="#" style="color:#12d640">多模态RAG文博知识问答系统</a><br> </h4>
+                <h5 style="text-align:left;">2025年9月 - 2026年3月</h5>
+                <p style="text-align:left;color:#fff"><em>独立开发者</em></p>
+                <ul style="text-align:left;">
+                  <li><strong>项目地址：</strong><a href="https://github.com/Tswoen/Museum-AI" target="_blank" rel="noopener" style="color:#12d640">github.com/Tswoen/Museum-AI</a></li>
+                  <li><strong>技术栈：</strong>LangChain、LangGraph、GraphRAG、Neo4j、Redis、CNCLIP、MCP</li>
+                  <li><strong>项目背景：</strong>智博AI是面向文博领域的多模态RAG / GraphRAG问答系统，围绕文博资料分散、专业内容检索门槛高、普通RAG易幻觉的问题，构建“文档解析、多源入库、检索增强、图谱推理、评测迭代”的完整问答链路。</li>
+                  <li><strong>文档分块与向量入库：</strong>采用递归切分+语义相似度合并构建父子分块，命中子分块后返回完整父分块，并将父块控制在2048 token内，减少文档结构错乱和语义断裂导致的召回噪声。</li>
+                  <li><strong>多策略检索机制：</strong>落地“问题改写与意图识别、文本/图像预检索、Agent按需调用文本库、图像库、知识图谱和MCP工具”的检索链路，采用源内重排、源间保留TopK解决异构分数不可比问题。</li>
+                  <li><strong>知识图谱检索：</strong>引入LightRAG自动抽取实体关系并落库Neo4j，支持基于实体关联和多跳路径的检索补充，缓解纯向量RAG在复杂关系问答中的幻觉。</li>
+                  <li><strong>记忆与缓存机制：</strong>构建短期5轮对话记忆、长期摘要记忆和客观事实类QA语义缓存；结合轮次衰减、负反馈删除和动态阈值调节，兼顾多轮连贯性、响应延迟与缓存答案可靠性。</li>
+                  <li><strong>项目成果：</strong>完成多模态RAG与GraphRAG全流程闭环搭建；基于自建100条专业测试集评测，模型上下文精确度达74%、召回率87%，关键信息回答准确率从61%提升至82%，图文匹配余弦相似度整体提升7%。</li>
+                </ul>
+              </div>
+              <h3 style="text-align:left;color:#12d640;font-size:20px;font-weight:600;margin:28px 10px 4px;">教育背景</h3>
+              <div class="col-md-12 mt-4 mt-md-0 icon-box" data-aos="fade-up" data-aos-delay="100">
+                <h4 style="text-align:left;"><a href="#" style="color:#12d640">武汉理工大学（211工程）</a><br> </h4>
                 <h5 style="text-align:left;">2024年9月 - 2027年6月</h5>
-                <p style="text-align:left;color:#fff"><em>人工智能专业 硕士研究生</em></p>
+                <p style="text-align:left;color:#fff"><em>软件工程 硕士研究生</em></p>
                 <ul style="text-align:left;">
-                  <li>人工智能专业硕士在读，研一阶段修完全部培养方案课程，专业绩点4.13，获研究生一等奖学金</li>
-                  <li>跟随导师进驻国家超级计算长沙中心开展课题研究，聚焦深度学习与智慧医疗应用方向</li>
+                  <li>学业成果：GPA 3.60/4.0，专业前20%，硕士研究生二等学业奖学金。</li>
                 </ul>
               </div>
               <div class="col-md-12 mt-4 mt-md-0 icon-box" data-aos="fade-up" data-aos-delay="100">
-                <h4 style="text-align:left;"><a href="#" style="color:#12d640">中南民族大学</a><br> </h4>
+                <h4 style="text-align:left;"><a href="#" style="color:#12d640">湖南工业大学</a><br> </h4>
                 <h5 style="text-align:left;">2020年9月 - 2024年6月</h5>
-                <p style="text-align:left;color:#fff"><em>计算机科学与技术专业 本科</em></p>
+                <p style="text-align:left;color:#fff"><em>软件工程 本科</em></p>
                 <ul style="text-align:left;">
-                  <li>大一加入学院New Thread实验室，系统学习Web开发与机器学习技术，独立搭建实验室官方网站</li>
-                  <li>参与泰迪杯数据分析挑战赛获省级三等奖，以及蓝桥杯、天梯赛等多项学科竞赛，基于Python与机器学习算法完成电力负荷预测建模</li>
-                  <li>大三系统自学深度学习知识，明确人工智能发展方向，确定深耕该领域并继续读研深造</li>
+                  <li>学业成果：GPA 3.77/4.0，专业前10%，2024校级奖学金。</li>
                 </ul>
               </div>
           </div>
