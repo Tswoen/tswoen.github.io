@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Agent 测试与量化：指标体系、评估手段与落地难点</title>
+  <style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", sans-serif; background: linear-gradient(180deg, #0f172a 0%, #1a1f3a 100%); background-image: linear-gradient(rgba(99, 102, 241, 0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(99, 102, 241, 0.05) 1px, transparent 1px), linear-gradient(180deg, #0f172a 0%, #1a1f3a 100%); background-size: 40px 40px, 40px 40px, 100% 100%; color: #cbd5e1; line-height: 1.75; min-height: 100vh; }
+.article-container { max-width: 820px; margin: 0 auto; padding: 48px 28px; }
+.article-title { color: #e2e8f0; font-size: 2rem; font-weight: 600; line-height: 1.3; margin-bottom: 18px; }
+.article-meta { color: #94a3b8; font-size: 0.95rem; padding-bottom: 20px; margin-bottom: 32px; border-bottom: 1px solid rgba(148, 163, 184, 0.15); }
+.article-container h2 { color: #d1d5db; font-size: 1.5rem; font-weight: 600; margin: 40px 0 18px; }
+.article-container p { margin-bottom: 18px; font-size: 1rem; color: #cbd5e1; }
+.inline-code { background-color: #1e1b4b; color: #c4b5fd; padding: 2px 8px; border-radius: 4px; font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; font-size: 0.92em; }
+.article-container ul { padding-left: 24px; margin-bottom: 18px; }
+.article-container li { margin-bottom: 8px; color: #cbd5e1; }
+.article-container strong { color: #e2e8f0; font-weight: 600; }
+::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar-track { background: rgba(15, 23, 42, 0.5); }
+::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #475569; }
+@media (max-width: 640px) { .article-container { padding: 32px 16px; } .article-title { font-size: 1.6rem; } }
+  </style>
+</head>
+<body>
+  <div class="article-container">
+    <h1 class="article-title">Agent 测试与量化：指标体系、评估手段与落地难点</h1>
+    <div class="article-meta">作者：汤文&nbsp;&nbsp;日期：2026-09-13&nbsp;&nbsp;阅读时长：约 11 分钟</div>
+
+    <p>上线只是开始。这一篇整理 Agent 与 RAG 系统「怎么测、怎么量化、怎么持续迭代」的完整思路。</p>
+
+    <h2>如何持续监控和评估一个已经部署上线的 LLM 应用或 Agent 服务</h2>
+    <p>最基础的手段是日志记录与用户反馈机制，在此基础上还要监控 Agent 执行过程中的各类指标。</p>
+    <ul>
+      <li><strong>输入指标</strong>：问题长度、主题分布、提问语言等。</li>
+      <li><strong>输出指标</strong>：回答长度、JSON 格式错误率、拒绝回答率等。</li>
+      <li><strong>过程指标（针对 Agent）</strong>：平均执行步数、工具调用频率、工具调用失败率。</li>
+    </ul>
+
+    <h2>人工审核与分析</h2>
+    <p><strong>定期人工审计</strong>：对生产环境中的随机样本、用户反馈的坏案例、以及自动化监控发现的异常案例进行深入的人工分析。</p>
+    <p>人工分析不只是打标，更重要的是把结论反哺到评估集和规则里，避免同样的问题反复出现。</p>
+
+    <h2>反馈闭环与模型迭代</h2>
+    <ul>
+      <li><strong>持续的数据管理</strong>：将从生产环境中发现的有价值的案例（特别是失败案例和用户不喜欢的案例）清洗、标注后，持续地加入到<strong>评估集</strong>和<strong>微调数据集</strong>中。</li>
+      <li><strong>定期再训练 / 微调</strong>：根据积累的新数据，定期对模型进行微调（Fine-tuning）或重新训练（Re-training），以适应新的数据分布和用户需求。</li>
+      <li><strong>A/B 测试</strong>：在上线新版本的模型或 Agent 逻辑时，使用 A/B 测试框架，小流量验证新版本的性能是否优于旧版本，确保每次迭代都是正向的。</li>
+    </ul>
+    <p>通过建立这样一个「<strong>采集 -&gt; 监控 -&gt; 分析 -&gt; 迭代</strong>」的闭环，我们可以主动地管理和维护线上服务的质量，而不是被动地等待用户投诉。</p>
+
+    <h2>Agent 量化标准</h2>
+    <p>目前行业尚未形成统一的 Agent 量化标准，但在核心评估维度上已出现一些共识性方向，可归纳为以下三层框架。</p>
+
+    <h2>指标体系：结果维度</h2>
+    <ul>
+      <li><strong>任务成功率</strong>：最直接的结果指标。</li>
+      <li><strong>ROI 与效率提升</strong>：量化 Agent 对业务效率的直接影响。</li>
+    </ul>
+
+    <h2>指标体系：过程维度</h2>
+    <ul>
+      <li><strong>工具调用成功率</strong>：反映工具链路的可靠性。</li>
+      <li><strong>轨迹效率</strong>：完成任务所需步骤数、工具切换次数、等待时间等。例如：投研场景中，传统人工需 90-180 天完成的任务，AI Agent 可缩短至 7 天。</li>
+      <li><strong>自我纠错率</strong>：反映 Agent 在遇到错误时能否通过自我反思（Self-Refine）或回滚机制恢复，而非直接失败。</li>
+    </ul>
+
+    <h2>指标体系：系统维度</h2>
+    <ul>
+      <li><strong>资源消耗</strong>（Token / 算力）。</li>
+      <li><strong>端到端延迟</strong>。</li>
+      <li><strong>稳定性</strong>：LLM 本质是概率模型，所以同一个任务，得到的结果不一定相同，稳定性是指 Agent 完成任务的稳定性如何。</li>
+    </ul>
+
+    <h2>评估手段</h2>
+    <ul>
+      <li><strong>基于规则</strong>：只要是逻辑确定的任务，都可以使用这种手段，绝对客观。比如对于代码生成 Agent，可使用自动化单元测试。</li>
+      <li><strong>模型裁判（LLM-as-a-Judge）</strong>：对于开放型主观生成 Agent，用强模型多维度打分。</li>
+    </ul>
+
+    <h2>落地难点</h2>
+    <ul>
+      <li><strong>单点错误</strong>：级联错误难以归因。第一步错了，后面可能都会错，所以很难确定是哪一步导致的。方案是模块化拆解评估，不要只测「端到端成功率」，而是把 Agent 拆成几个独立层分别评估。</li>
+      <li><strong>裁判幻觉</strong>：Agent 可能会骗裁判，或者裁判本身出现幻觉了看走了眼。方案是采用多路裁判交叉验证，配合人工定期抽检校准。</li>
+    </ul>
+
+    <h2>RAG 量化</h2>
+    <p>评估核心维度：从上下文相关性、答案忠实度、答案相关性三个维度量化打分，底层需关注 Recall@K 召回率指标。</p>
+    <p><strong>如何打分与成本控制</strong>：主流用 LLM-as-a-Judge 机制，可选用 RAGAS 快速跑通评估闭环。大厂采用分层抽样与大小模型协同，构建 1000 条黄金测试集（极具代表性的历史 query 和标准答案），日常用开源小模型自动化打分，重大版本更新才调用大模型终审（小改动用微调过的小模型打分，大更新用最强的大模型进行打分）。</p>
+
+    <h2>工程上实用的两层评估</h2>
+    <p>工程上比较实用的做法是把评估拆成两层。</p>
+    <p><strong>第一层是检索层评估</strong>，它不管 LLM 的输出，主要评估检索的质量，工程里常用的指标有 <strong>Recall@K</strong> 和 <strong>Precision@K</strong>、<strong>MRR</strong>（平均倒数排名）。</p>
+    <p><strong>第二层是生成质量的评估</strong>：常用的指标有 <strong>Faithfulness（忠实度）</strong>、<strong>Answer Relevancy（答案相关性）</strong>。</p>
+    <p>通过这些指标可以定位到 RAG 系统中哪部分有问题：</p>
+    <ul>
+      <li><strong>Hit@K 低</strong>：换更强的 Embedding 模型、调整 Chunking 策略、或者加多路召回来补充覆盖面。</li>
+      <li><strong>MRR 低</strong>：说明检索召回了太多噪音，相关内容是找到了，但不相关的内容也混进来了，把 LLM 的注意力稀释掉了。优化方向是加强 Rerank 模型、调低最终送给 LLM 的 chunk 数量。</li>
+      <li><strong>Faithfulness 低</strong>：说明 LLM 在编造，幻觉问题多。</li>
+      <li><strong>Answer Relevancy 低</strong>：说明答案跑题了，没有聚焦在用户问的问题上，告诉 LLM「请严格回答问题本身，不要展开无关内容」往往就能改善。</li>
+    </ul>
+    <p>上面说的都是离线指标，最终还是要看线上用户的反应：踩率、重新生成的比率、转人工率。</p>
+  </div>
+</body>
+</html>

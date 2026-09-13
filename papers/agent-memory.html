@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Agent 的短期记忆与长期记忆</title>
+  <style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", sans-serif; background: linear-gradient(180deg, #0f172a 0%, #1a1f3a 100%); background-image: linear-gradient(rgba(99, 102, 241, 0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(99, 102, 241, 0.05) 1px, transparent 1px), linear-gradient(180deg, #0f172a 0%, #1a1f3a 100%); background-size: 40px 40px, 40px 40px, 100% 100%; color: #cbd5e1; line-height: 1.75; min-height: 100vh; }
+.article-container { max-width: 820px; margin: 0 auto; padding: 48px 28px; }
+.article-title { color: #e2e8f0; font-size: 2rem; font-weight: 600; line-height: 1.3; margin-bottom: 18px; }
+.article-meta { color: #94a3b8; font-size: 0.95rem; padding-bottom: 20px; margin-bottom: 32px; border-bottom: 1px solid rgba(148, 163, 184, 0.15); }
+.article-container h2 { color: #d1d5db; font-size: 1.5rem; font-weight: 600; margin: 40px 0 18px; }
+.article-container p { margin-bottom: 18px; font-size: 1rem; color: #cbd5e1; }
+.inline-code { background-color: #1e1b4b; color: #c4b5fd; padding: 2px 8px; border-radius: 4px; font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; font-size: 0.92em; }
+.article-container ul { padding-left: 24px; margin-bottom: 18px; }
+.article-container li { margin-bottom: 8px; color: #cbd5e1; }
+.article-container strong { color: #e2e8f0; font-weight: 600; }
+::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar-track { background: rgba(15, 23, 42, 0.5); }
+::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #475569; }
+@media (max-width: 640px) { .article-container { padding: 32px 16px; } .article-title { font-size: 1.6rem; } }
+  </style>
+</head>
+<body>
+  <div class="article-container">
+    <h1 class="article-title">Agent 的短期记忆与长期记忆</h1>
+    <div class="article-meta">作者：汤文&nbsp;&nbsp;日期：2026-09-13&nbsp;&nbsp;阅读时长：约 4 分钟</div>
+
+    <p>参考链接：<code class="inline-code">https://zhuanlan.zhihu.com/p/1961183774369887317</code></p>
+
+    <h2>记忆的划分标准</h2>
+    <p>短期记忆与长期记忆，是从<strong>功能定位</strong>而非<strong>存储介质</strong>来定义的。记忆的主体是 Agent，要站在 Agent 的角度来看待：比如用户的历史记录，对于 Agent 来说只对当前会话有用，这是短期记忆；比如系统的外部资料、用户的偏好，这对 Agent 来说每次都要遵守、要时刻记住，所以这是长期记忆。</p>
+    <p>换句话说，判断标准不是「存在内存还是磁盘」，而是「这份信息在 Agent 的视角下承担什么职责」。</p>
+
+    <h2>短期记忆</h2>
+    <p>AI Agent 里的「短期记忆」核心是「服务当前会话 / 任务的临时信息」。哪怕物理上存到了磁盘（比如临时缓存文件），只要它的作用是支撑当前上下文连续性、且会被后续新信息「覆盖 / 清除」（比如超出滑动窗口后被丢弃），就属于短期记忆的范畴。</p>
+    <ul>
+      <li>典型内容：本轮对话历史、当前任务的中间结果、工具调用的观察结果。</li>
+      <li>生命周期：随会话推进被压缩、裁剪或直接丢弃。</li>
+      <li>关注点：上下文的连续性，以及窗口被撑爆时的压缩策略。</li>
+    </ul>
+
+    <h2>长期记忆</h2>
+    <p>而长期记忆的「持久化」是<strong>主动、长期保留的价值信息</strong>（比如用户偏好），不是临时缓存的会话记录。</p>
+    <ul>
+      <li>典型内容：用户画像与偏好、领域知识库、沉淀下来的技能与规范文档。</li>
+      <li>生命周期：跨会话保留，需要定期整理与更新。</li>
+      <li>关注点：如何写入、如何检索、如何避免错误信息持续沉淀。</li>
+    </ul>
+
+    <h2>两者的关系</h2>
+    <p>短期记忆解决的是「这一轮对话不要断片」，长期记忆解决的是「换个会话它还记得我」。工程上常见的设计是：短期记忆用滑动窗口 + 摘要压缩来维持上下文，长期记忆用检索的方式按需注入，二者配合才能既保证当前任务的连贯性，又保证跨会话的一致体验。</p>
+  </div>
+</body>
+</html>

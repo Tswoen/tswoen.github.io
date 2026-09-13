@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <!-- Google Tag Manager -->
@@ -488,7 +488,7 @@
                 description: '涵盖 uv 的安装、缓存配置、项目初始化、虚拟环境、依赖管理、同步、构建与 uvx 工具运行。',
                 tags: ['uv', 'Python', 'Package Manager'],
                 category: 'python',
-                link: '../papers/pape1.html'
+                articleUrl: '../papers/pape1.html'
             },
             {
                 icon: '⚛️',
@@ -553,6 +553,102 @@
                 tags: ['Asyncio', 'Aiohttp', 'Scrapy'],
                 category: 'python',
                 link: DEFAULT_LINK
+            },
+            {
+                icon: '🧩',
+                title: 'Agent 核心原理：RAG、CoT 与 ReAct',
+                description: '从 RAG 的三大优势、CoT 思维链与 ReAct 推理行动循环讲起，深入 Harness Engineering 的三次浪潮与「上下文工程、架构约束、熵管理」三位一体框架。',
+                tags: ['RAG', 'ReAct', 'Harness', 'MCP'],
+                category: 'ai',
+                articleUrl: '../papers/agent-core.html'
+            },
+            {
+                icon: '🧠',
+                title: 'Agent 的记忆体系与开发实践',
+                description: '区分短期记忆与长期记忆的功能定位，并整理 SSE 流式返回原理与 Vibe Coding 的落地思路：定边界、拆需求、引入反馈环。',
+                tags: ['Memory', 'SSE', 'Vibe Coding'],
+                category: 'ai',
+                articleUrl: '../papers/agent-memory.html'
+            },
+            {
+                icon: '🔬',
+                title: 'Agent 测试与量化：指标、评估与 RAG 评估',
+                description: '覆盖上线监控、反馈闭环与 Agent 三层量化指标，并给出 Recall@K、MRR、Faithfulness 等指标异常时的具体优化方向。',
+                tags: ['Evaluation', 'RAGAS', 'LLM-as-a-Judge'],
+                category: 'ai',
+                articleUrl: '../papers/agent-eval.html'
+            },
+            {
+                icon: '🛡️',
+                title: 'Agent 安全：提示词注入与幻觉控制',
+                description: '提示词注入的五层工程防护、幻觉的三类成因与分层防御，以及强制结构化输出 JSON 与提升工具调用可靠性的完整方案。',
+                tags: ['Security', 'Prompt Injection', 'Guardrails'],
+                category: 'ai',
+                articleUrl: '../papers/agent-security.html'
+            },
+            {
+                icon: '⚙️',
+                title: 'Agent 开发进阶：选模型、提速度与 Workflow 边界',
+                description: '旗舰模型与轻量模型的取舍维度、KV Cache 与语义缓存等加速手段，以及 workflow 与 agent 的适用边界。',
+                tags: ['Model Selection', 'KV Cache', 'Workflow'],
+                category: 'ai',
+                articleUrl: '../papers/agent-development.html'
+            },
+            {
+                icon: '🌐',
+                title: 'Agent 发展：MCP 定位与主流 Agent 架构',
+                description: 'MCP 与 CLI 之争的官方回应与 Token 优化解法、LLM Wiki 与 RAG 的取舍，并拆解 openclaw、Claude Code、Hermes Agent 的架构设计。',
+                tags: ['MCP', 'Claude Code', 'Agent Loop'],
+                category: 'ai',
+                articleUrl: '../papers/agent-trends.html'
+            },
+            {
+                icon: '🔭',
+                title: 'LLM 原理：Transformer、KV Cache 与 LoRA',
+                description: '从多头注意力与位置编码讲到 Decoder-only 架构，并解释 KV Cache、LoRA 低秩微调、温度采样与 Cross-Encoder 重排的工作机制。',
+                tags: ['Transformer', 'LoRA', 'Reranker'],
+                category: 'ai',
+                articleUrl: '../papers/llm-basics.html'
+            },
+            {
+                icon: '🚀',
+                title: 'AI 开放题：用 AI、风险与工程师的未来',
+                description: 'AI Coding 的使用原则、AI 的依赖与质量风险，以及 Harness 时代工程师向「AI 系统设计师」转型所需的职责与技能。',
+                tags: ['AI Coding', 'Career', 'Harness'],
+                category: 'ai',
+                articleUrl: '../papers/ai-practice.html'
+            },
+            {
+                icon: '🧪',
+                title: '前沿追踪：Forge 的外围工程五层防护',
+                description: '解析层、重试提示、步骤强制、错误恢复与上下文压缩五层设计，如何让 8B 本地模型逼近闭源模型的连续多步准确率。',
+                tags: ['Local LLM', 'Guardrails', 'Context'],
+                category: 'ai',
+                articleUrl: '../papers/agent-frontier.html'
+            },
+            {
+                icon: '💼',
+                title: '面试八股 · 通用篇：经历、规划与自我认知',
+                description: '校园经历、职业规划、优缺点、最大挫折与压力应对等 HR 通用问题的问题拆解与回答要点整理。',
+                tags: ['Interview', 'HR', 'Career'],
+                category: 'tool',
+                articleUrl: '../papers/hr-general.html'
+            },
+            {
+                icon: '🏢',
+                title: '面试八股 · 华为篇：价值观与部门认知',
+                description: '华为核心价值观、质量与流程 IT 部门定位、选择理由与加班观的完整回答思路整理。',
+                tags: ['Huawei', 'Interview', 'Culture'],
+                category: 'tool',
+                articleUrl: '../papers/hr-huawei.html'
+            },
+            {
+                icon: '❓',
+                title: '面试八股 · 反问篇：可以问面试官什么',
+                description: '部门业务规划、团队成长路径、实习生职责与转正考核方式，用反问展现长期发展意愿。',
+                tags: ['Interview', 'Reverse Question'],
+                category: 'tool',
+                articleUrl: '../papers/hr-questions.html'
             }
         ];
 
@@ -591,7 +687,8 @@
             PROJECTS.forEach((project, index) => {
                 const card = document.createElement('a');
                 card.className = 'project-card';
-                card.href = project.link;
+                // 优先使用 articleUrl（站内文章），否则回退到 link（外部链接）
+                card.href = project.articleUrl || project.link;
                 card.target = '_blank';
                 card.rel = 'noopener noreferrer';
                 card.dataset.category = project.category;

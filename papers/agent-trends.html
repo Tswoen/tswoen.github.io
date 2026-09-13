@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Agent 发展：MCP 定位、LLM Wiki 与主流 Agent 架构</title>
+  <style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", sans-serif; background: linear-gradient(180deg, #0f172a 0%, #1a1f3a 100%); background-image: linear-gradient(rgba(99, 102, 241, 0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(99, 102, 241, 0.05) 1px, transparent 1px), linear-gradient(180deg, #0f172a 0%, #1a1f3a 100%); background-size: 40px 40px, 40px 40px, 100% 100%; color: #cbd5e1; line-height: 1.75; min-height: 100vh; }
+.article-container { max-width: 820px; margin: 0 auto; padding: 48px 28px; }
+.article-title { color: #e2e8f0; font-size: 2rem; font-weight: 600; line-height: 1.3; margin-bottom: 18px; }
+.article-meta { color: #94a3b8; font-size: 0.95rem; padding-bottom: 20px; margin-bottom: 32px; border-bottom: 1px solid rgba(148, 163, 184, 0.15); }
+.article-container h2 { color: #d1d5db; font-size: 1.5rem; font-weight: 600; margin: 40px 0 18px; }
+.article-container p { margin-bottom: 18px; font-size: 1rem; color: #cbd5e1; }
+.inline-code { background-color: #1e1b4b; color: #c4b5fd; padding: 2px 8px; border-radius: 4px; font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; font-size: 0.92em; }
+.article-container ul { padding-left: 24px; margin-bottom: 18px; }
+.article-container li { margin-bottom: 8px; color: #cbd5e1; }
+.article-container strong { color: #e2e8f0; font-weight: 600; }
+::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar-track { background: rgba(15, 23, 42, 0.5); }
+::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #475569; }
+@media (max-width: 640px) { .article-container { padding: 32px 16px; } .article-title { font-size: 1.6rem; } }
+  </style>
+</head>
+<body>
+  <div class="article-container">
+    <h1 class="article-title">Agent 发展：MCP 定位、LLM Wiki 与主流 Agent 架构</h1>
+    <div class="article-meta">作者：汤文&nbsp;&nbsp;日期：2026-09-13&nbsp;&nbsp;阅读时长：约 12 分钟</div>
+
+    <p>这一篇关注生态与架构的演进：MCP 与 CLI 的关系、LLM Wiki 与 RAG 的取舍，以及几个主流 Agent 工程（openclaw、Claude Code、Hermes Agent）的实现思路。</p>
+
+    <h2>MCP 被 CLI 淘汰了吗</h2>
+    <p>Anthropic 发布博客为 MCP 正名，明确其作为云端 AI Agent 标准化连接层的定位。</p>
+    <ul>
+      <li><strong>社区三大批评</strong>：视频引用 ScaleKit 测试数据，指出 MCP 存在成本高（为 CLI 的 17 倍）、上下文占用严重（占 72% 上下文窗口）、Schema 臃肿（GitHub MCP 每次交互需发送 43 个工具的说明书）三大问题。</li>
+      <li><strong>官方重新定位</strong>：Anthropic 提出 Agent 连接外部系统有三种方式，直连 API 适合简单场景但扩展性差，CLI 适合本地环境，而 MCP 的核心价值是作为云端 Agent 的标准化接入层，可统一服务各类客户端，其 SDK 月下载量已从 1 亿飙升至 3 亿。</li>
+      <li><strong>核心技术解法</strong>：一是 Tool Search，按需加载工具定义，可减少超 85% 的工具定义 Token；二是程序化工具调用，让模型在代码沙箱处理数据后返回精炼结果，可额外减少约 37% 的 Token 消耗。两者结合将 MCP 与 CLI 的 Token 消耗差距从 32 倍缩小至 7 倍。</li>
+      <li><strong>落地案例与生态</strong>：Cloudflare 通过仅暴露 <code class="inline-code">search</code> 和 <code class="inline-code">execute</code> 两个工具，将 2500 个 API 端点的工具定义 Token 消耗控制在约 1000 个；MCP 与 Skills 融合，形成成熟协调的生态，Skills 负责能力连接与任务编排。</li>
+      <li><strong>未来协作架构</strong>：云端生产环境将以 <code class="inline-code">MCP + Skills</code> 为主流，本地开发者环境以 <code class="inline-code">CLI + Skills</code> 为首选，简单任务则用直连 API，AI Agent 连接层将走向多元化、专业化。</li>
+    </ul>
+    <p>结论是：MCP 并未被淘汰，只是找到了适配自身的应用场景。</p>
+
+    <h2>LLM Wiki 与 RAG</h2>
+    <p>Karpathy 提出的 LLM Wiki 有五个缺点：</p>
+    <ul>
+      <li><strong>废 token 非绝对</strong>：LLM Wiki 省 95% token 的说法需看场景。RAG 是每次提问检索生成，LLM Wiki 是每次加新资料时，需让 LLM 通读原文、更新索引、改写页面并重新总结，实际是换了地方消耗 token。</li>
+      <li><strong>容量有天花板</strong>：LLM Wiki 在一百个 sources 规模时效果不错，过几百个 notes 后索引导航会卡顿，量过五万到十万 tokens 时效率不如 RAG，还会出现检索、阅读路径规划等问题。</li>
+      <li><strong>错误易沉淀</strong>：LLM Wiki 的错误会直接写入并沉淀，影响后续所有查询，且错误较难发现，会导致后续回答持续偏离。</li>
+      <li><strong>不适合快更场景</strong>：新闻流、频繁修改的文档、实时业务数据、多人编辑知识库等场景，LLM Wiki 需反复编译、处理冲突、清理内容，远不如 RAG 高效。</li>
+      <li><strong>难适配企业场景</strong>：LLM Wiki 难以实现企业所需的权限管控、内容追溯等需求，目前仅适合个人或小团队使用。</li>
+    </ul>
+    <p>LLM Wiki 适合个人研究、小团队知识沉淀等长期固定主题场景，RAG 适合企业数据库、客服等强权限、高并发场景，二者搭配使用效果最佳。</p>
+
+    <h2>openclaw 架构</h2>
+    <p>它的整体架构核心是网关统一调度 + Agent Loop，将消息通信层和 AI 执行层彻底分离，这样就能实现多聊天平台的统一接入。</p>
+    <ul>
+      <li><strong>通信层</strong>：可以对接各种聊天渠道，每个聊天平台都有专门的渠道适配器，负责统一身份验证、访问控制和消息格式化，确保不同平台的消息能转换成系统可识别的统一格式。</li>
+      <li><strong>网关</strong>：是整个系统的大脑中枢，所有消息和指令都必须经过这里，主要负责消息的接收与路由。</li>
+      <li><strong>智能体执行层</strong>：这是真正干活的核心，每一轮对话都会经过四个步骤——先确定会话类型，然后组装上下文，接着调用 AI 模型并在沙箱内执行工具，最后将所有对话内容和工具执行结果保存到本地。</li>
+      <li><strong>能力层</strong>：最底层，包含内置的工具，以及用户自定义的工具。</li>
+    </ul>
+
+    <h2>openclaw 的上下文</h2>
+    <p>主要由系统提示词、会话历史、工具调用链路以及工作区文件四部分动态组装而成。</p>
+    <ul>
+      <li><strong>系统提示词（动态重建）</strong>：工具列表 + Schema、Skills 元数据、运行时信息、工作区位置、时间与环境配置，每次运行自动重构，保证最新规则生效。对于 skill 只会注入其元数据，正文内容会按需加载。</li>
+      <li><strong>会话历史</strong>：用户消息 + 助手回复以及工具调用。上下文太长时会按策略被压缩 / 裁剪，压缩是对会话进行摘要同时保留最近的消息不变，裁剪移除旧的工具结果。</li>
+      <li><strong>工作区文件注入</strong>：默认加载 <code class="inline-code">AGENTS</code>、<code class="inline-code">SOUL</code>、<code class="inline-code">TOOLS</code>、<code class="inline-code">IDENTITY</code> 等固定文件，<strong>大文件自动截断</strong>（默认 20000 字符），避免撑爆窗口。</li>
+    </ul>
+
+    <h2>Claude Code 原理</h2>
+    <p>核心逻辑是一个循环：<strong>上下文准备 -&gt; 模型流式调用 -&gt; 工具执行 -&gt; 附件收集 -&gt; 终止 / 继续</strong>。通过一个循环不断调用工具，以及为了让这个循环能够平稳运行的一套外围工程设计，也就是 Harness 工程。</p>
+    <p>启动后完成一些装配工作：加载配置，初始化 MCP、LSP、插件、Skills，根据模式启动 REPL、非交互流程或远程会话。</p>
+    <p>然后解析用户输入，对用户输入进行意图识别，判断是命令还是普通任务。如果是 slash command，会进入命令分发器；如果是自然语言任务，会进入 Agent 主循环。</p>
+    <p>进入 Agent Loop，这是 Claude Code 的核心，把一次用户任务转化为连续推进的执行过程。模型拿到的不是单一 prompt，而是一个组合上下文。模型会基于这些信息决定下一步动作，当模型判断需要行动时，会生成结构化的工具调用请求。</p>
+    <p>Claude Code 运行时接到工具调用后，会进行以下处理：</p>
+    <ul>
+      <li><strong>参数校验</strong>：检查路径是否合法、参数是否完整、命令是否可执行。</li>
+      <li><strong>权限检查</strong>：判断当前工具是否允许自动执行，是否命中 deny 规则，是否需要用户确认。</li>
+      <li><strong>真实执行</strong>：由 CLI 或宿主环境读文件、写文件、跑命令、访问 MCP server。</li>
+      <li><strong>结果回传</strong>：把执行结果作为新的观察送回模型。</li>
+    </ul>
+    <p>当需要改代码时，Claude Code 通常不会盲目重写整个项目，而是先搜索相关文件，阅读入口文件、调用链、测试文件，判断最小修改点，使用编辑工具进行 patch，展示或记录 diff，根据权限模式决定是否自动接受或等待确认。</p>
+    <p>Claude Code 完成修改后，通常会主动验证。如果测试失败，主循环不会立即结束，而是继续分析失败信息，它有执行反馈闭环。任务完成时，Claude Code 会进行总结、更新会话状态和记忆。如果用户继续输入，系统复用当前会话上下文；如果上下文过长，则可能触发压缩或让用户手动 <code class="inline-code">/compact</code>。</p>
+
+    <h2>Hermes Agent</h2>
+    <p>核心卖点为闭环学习循环机制。</p>
+    <ul>
+      <li><strong>触发机制</strong>：设主动与后台审查两条路径，主动路径由模型依据工具引导文字判断是否创建技能；后台路径每累计 10 次工具调用，启动独立审查 Agent 基于对话历史判断。</li>
+      <li><strong>技能生成</strong>：任务完成后生成含操作步骤、踩坑记录的结构化 Markdown 技能文档，存入统一目录，支持补丁式更新，仅替换需修改部分。</li>
+      <li><strong>技能复用</strong>：采用渐进式加载，系统提示词仅放技能名称与描述索引，设进程内 LRU 缓存与磁盘快照两层缓存，Agent 按需加载技能完整内容。</li>
+      <li><strong>后台审查</strong>：设记忆审查计数器，每累计 10 轮用户回合触发，可与技能审查同时进行；对话压缩前先存储记忆，避免信息丢失。</li>
+      <li><strong>现存局限</strong>：技能创建依赖模型判断无确定性；无公开基准测试衡量技能复用率；Agent 对技能库有全读写权限，存在误改风险。</li>
+    </ul>
+  </div>
+</body>
+</html>

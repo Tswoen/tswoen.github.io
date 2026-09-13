@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LLM 原理：Transformer、KV Cache、LoRA 与采样</title>
+  <style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", sans-serif; background: linear-gradient(180deg, #0f172a 0%, #1a1f3a 100%); background-image: linear-gradient(rgba(99, 102, 241, 0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(99, 102, 241, 0.05) 1px, transparent 1px), linear-gradient(180deg, #0f172a 0%, #1a1f3a 100%); background-size: 40px 40px, 40px 40px, 100% 100%; color: #cbd5e1; line-height: 1.75; min-height: 100vh; }
+.article-container { max-width: 820px; margin: 0 auto; padding: 48px 28px; }
+.article-title { color: #e2e8f0; font-size: 2rem; font-weight: 600; line-height: 1.3; margin-bottom: 18px; }
+.article-meta { color: #94a3b8; font-size: 0.95rem; padding-bottom: 20px; margin-bottom: 32px; border-bottom: 1px solid rgba(148, 163, 184, 0.15); }
+.article-container h2 { color: #d1d5db; font-size: 1.5rem; font-weight: 600; margin: 40px 0 18px; }
+.article-container p { margin-bottom: 18px; font-size: 1rem; color: #cbd5e1; }
+.inline-code { background-color: #1e1b4b; color: #c4b5fd; padding: 2px 8px; border-radius: 4px; font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; font-size: 0.92em; }
+.article-container ul { padding-left: 24px; margin-bottom: 18px; }
+.article-container li { margin-bottom: 8px; color: #cbd5e1; }
+.article-container strong { color: #e2e8f0; font-weight: 600; }
+::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar-track { background: rgba(15, 23, 42, 0.5); }
+::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #475569; }
+@media (max-width: 640px) { .article-container { padding: 32px 16px; } .article-title { font-size: 1.6rem; } }
+  </style>
+</head>
+<body>
+  <div class="article-container">
+    <h1 class="article-title">LLM 原理：Transformer、KV Cache、LoRA 与采样</h1>
+    <div class="article-meta">作者：汤文&nbsp;&nbsp;日期：2026-09-13&nbsp;&nbsp;阅读时长：约 12 分钟</div>
+
+    <p>这一篇把大模型侧的基础原理过一遍：Transformer 的注意力机制、Decoder-only 架构、KV Cache、LoRA 高效微调、温度采样，以及 Reranker 背后的 Cross-Encoder。</p>
+
+    <h2>Transformer 的理解</h2>
+    <p>Transformer 最核心的部分是它的多头注意力机制。然而注意力机制并不关心一个句子中 token 的位置，所以在进入多头注意力模块前，需要加入<strong>正弦余弦位置编码</strong>。</p>
+    <p>在多头注意力模块中，会对向量矩阵使用全连接层生成对应的 Q、K、V 矩阵。计算 <strong>Q</strong> 乘以 <strong>K</strong> 的转置，得到的结果可以表示单词之间的注意力强度；除以根号 d 做缩放，再使用 Softmax 计算每一个单词对于其他单词的 attention 系数，最后和 V 相乘，得到最终的输出 <strong>Z</strong>，它代表了每个词的「上下文表示」。</p>
+    <p>后续无非就是残差链接、归一化、全连接层，组成一个 Encoder Blocker，编码器由多个 Encoder Blocker 串连起来。在解码器的 Blocker 中多了一个掩码多头注意力模块，用来防止生成时看到未来位置的 token。</p>
+    <p><strong>【注】注意力机制是什么</strong>：注意力机制就是让模型在处理序列时，<strong>自动给重要信息分配更高权重，聚焦关键内容</strong>。</p>
+    <p><strong>【注】对 QKV 怎么理解的</strong>：Q、K、V 是通过线性变换得到的三个向量，分别对应：</p>
+    <ul>
+      <li><strong>Q（Query）查询</strong>：我现在要找什么。</li>
+      <li><strong>K（Key）键</strong>：别人有什么内容。</li>
+      <li><strong>V（Value）值</strong>：真正要提取的信息。</li>
+    </ul>
+    <p>注意力本质就是：<strong>用 Q 去匹配所有 K，得到权重，再对 V 加权求和</strong>。加权求和的结果，就是<strong>把序列里所有词的信息，按「重要程度」揉在一起，得到当前词的「上下文表示」</strong>。</p>
+
+    <h2>Decoder-only 的理解</h2>
+    <p>Decoder-only 架构<strong>只使用 Transformer 的解码器模块堆叠而成</strong>，没有编码器部分，像 GPT 系列都是典型的 Decoder-only 模型。</p>
+    <p>它采用<strong>自回归生成方式</strong>：生成时逐个输出 token，每预测下一个词时，只能看到<strong>当前输入和历史已经生成的 token</strong>，通过<strong>掩码多头自注意力</strong>屏蔽未来位置的信息，保证不会泄露未生成的内容，利用历史上下文不断迭代预测下一个 token，直到生成结束。</p>
+    <p>相比 Encoder-Decoder 架构，Decoder-only 结构更简洁，<strong>天然适配生成式任务</strong>，非常适合大语言模型做对话、续写、文本生成。</p>
+
+    <h2>KV Cache 的理解</h2>
+    <p>在大模型推理过程中，需要将最新 token 的 Q 与所有历史 token 的 K 进行点积运算，再与所有历史 token 的 V 进行点积运算。在这个过程中，如果所有历史 token 的 K 和 V 都要重新计算，就会有许多冗余的计算，大大增加推理的计算量与延迟。</p>
+    <p>所以引入了 KV Cache：把之前计算过的 K（键）和 V（值）矩阵缓存起来，后续生成新 token 时，无需重新计算所有历史 KV 数据，只需复用缓存的结果，大幅减少重复计算，节省推理时间和资源。</p>
+    <p>这也是为什么系统提示词要尽量保持静态前缀——稳定的前缀可以让这部分 KV 与计算被复用，从而提升首 token 速度和整体吞吐。</p>
+
+    <h2>LoRA 的理解</h2>
+    <p>传统模型微调需修改全部参数，参数量大、训练耗时，且易破坏原模型性能。LoRA（低秩适配）是高效微调技术，不改变原模型参数，仅在关键层添加两个低秩矩阵，通过训练这两个小矩阵，就能快速让模型适配新的任务需求，既保证了训练效率，又有效避免了原模型性能受损，实现了效率与性能的双重兼顾。</p>
+    <p>为什么使用低秩矩阵：之所以选择低秩矩阵，是因为模型参数的变化通常具有低秩特性，低秩矩阵能够以远少于原模型参数的规模，精准捕捉任务适配所需的参数变化，无需修改全部参数就能实现模型微调。</p>
+    <p><strong>数学原理</strong>：冻结原始权重 W，只在每个线性层旁加两个低秩矩阵 A（r×d）和 B（d×r），ΔW=BA，训练参数量从 d×d 降到 2×d×r（r&lt;&lt;d，通常 r=8-64）。</p>
+    <p>为什么低秩：</p>
+    <ul>
+      <li>权重更新矩阵 ΔW 在微调时天然低秩（研究发现 rank 远小于 d）。</li>
+      <li>数学上：任何矩阵都可 SVD 分解，保留前 r 个奇异值就能近似原更新，效果接近全参数微调，但显存 / 算力只剩 1/10-1/100。</li>
+      <li>额外好处：易合并（merge back 到原模型）、多 LoRA 切换快（Adapter）。</li>
+    </ul>
+
+    <h2>SVD（奇异值分解）说明</h2>
+    <p>SVD 可以把任意一个矩阵（比如 LoRA 里的权重更新矩阵 ΔW）拆解成三个部分：<code class="inline-code">ΔW = U × Σ × V^T</code>。</p>
+    <ul>
+      <li>U 和 V 是正交矩阵（可以理解为「方向矩阵」），Σ 是对角矩阵，对角线上的数值就是<strong>奇异值</strong>（按从<strong>大到小</strong>排列）。</li>
+      <li>奇异值的大小代表了这个「方向」上的信息强度：<strong>前几个大的奇异值</strong>包含了矩阵的绝大部分信息，后面的<strong>小奇异值几乎是噪声</strong>。</li>
+    </ul>
+    <p><strong>低秩近似</strong>：既然大部分信息集中在前 r 个奇异值上，我们可以只保留前 r 个奇异值（把后面的都置为 0），得到一个新的矩阵 <code class="inline-code">Σ_r</code>，用 <code class="inline-code">U × Σ_r × V^T</code> 就能近似还原原来的 ΔW。</p>
+
+    <h2>Temperature 等于 0 会怎么样</h2>
+    <p>设置 <code class="inline-code">Temperature=0</code> 时，许多框架会切换到<strong>纯贪心模式</strong>，确保输出可重复。</p>
+    <p><strong>纯贪心模式</strong>的做法是：</p>
+    <ul>
+      <li><strong>每次只选择概率最高的那个 token</strong>（即 argmax 操作：取 logits 或概率中的最大值）。</li>
+      <li>直接把这个 token 加入已生成序列，作为下一步的输入。</li>
+      <li>重复这个过程，直到生成结束符、达到最大长度或其他停止条件。</li>
+    </ul>
+
+    <h2>为什么 Temperature 等于 0，模型的输出依然不确定</h2>
+    <p>浮点加法不满足结合律，是因为有限精度下的舍入；模型计算中顺序不同，是因为 GPU 为了极致性能，使用了依赖 batch size / 并行策略的动态优化 kernel，导致累加树形状变化，最终舍入误差不同。</p>
+    <p>这些差异虽然很小，但因为 LLM 是自回归生成（一步错、步步错），一个 token 的 logit 翻转（原本第二高的 token 变成最高），后续整个序列就可能完全不同。</p>
+
+    <h2>Re-ranker 如何工作：Cross-Encoder 简介</h2>
+    <p>为什么 Re-ranker 更准？因为它通常使用一种叫做 <strong>Cross-Encoder（交叉编码器）</strong>的模型结构。</p>
+    <ul>
+      <li>我们之前用于 Embedding 的，叫 <strong>Bi-Encoder（双塔编码器）</strong>。它将问题和文档<strong>分开</strong>编码成向量，再计算相似度。速度快，但无法捕捉两者之间深层的交互信息。</li>
+      <li>而 <strong>Cross-Encoder</strong>，则是将问题和文档<strong>拼接在一起</strong>（<code class="inline-code">[CLS] 问题 [SEP] 文档 [SEP]</code>）后，再输入给一个强大的预训练模型（如 BERT）。这使得模型可以充分地、逐词地比较问题和文档的内部细节，从而给出极其精准的相关性判断。</li>
+    </ul>
+    <p>缺点就是计算量大、速度慢。所以它不适合用于海量文档的初筛，但极其适合对小范围的候选集进行「精加工」。</p>
+  </div>
+</body>
+</html>

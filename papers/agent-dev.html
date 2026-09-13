@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Agent 开发实践：SSE 流式返回与 Vibe Coding</title>
+  <style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", sans-serif; background: linear-gradient(180deg, #0f172a 0%, #1a1f3a 100%); background-image: linear-gradient(rgba(99, 102, 241, 0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(99, 102, 241, 0.05) 1px, transparent 1px), linear-gradient(180deg, #0f172a 0%, #1a1f3a 100%); background-size: 40px 40px, 40px 40px, 100% 100%; color: #cbd5e1; line-height: 1.75; min-height: 100vh; }
+.article-container { max-width: 820px; margin: 0 auto; padding: 48px 28px; }
+.article-title { color: #e2e8f0; font-size: 2rem; font-weight: 600; line-height: 1.3; margin-bottom: 18px; }
+.article-meta { color: #94a3b8; font-size: 0.95rem; padding-bottom: 20px; margin-bottom: 32px; border-bottom: 1px solid rgba(148, 163, 184, 0.15); }
+.article-container h2 { color: #d1d5db; font-size: 1.5rem; font-weight: 600; margin: 40px 0 18px; }
+.article-container p { margin-bottom: 18px; font-size: 1rem; color: #cbd5e1; }
+.inline-code { background-color: #1e1b4b; color: #c4b5fd; padding: 2px 8px; border-radius: 4px; font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; font-size: 0.92em; }
+.article-container ul { padding-left: 24px; margin-bottom: 18px; }
+.article-container li { margin-bottom: 8px; color: #cbd5e1; }
+.article-container strong { color: #e2e8f0; font-weight: 600; }
+::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar-track { background: rgba(15, 23, 42, 0.5); }
+::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #475569; }
+@media (max-width: 640px) { .article-container { padding: 32px 16px; } .article-title { font-size: 1.6rem; } }
+  </style>
+</head>
+<body>
+  <div class="article-container">
+    <h1 class="article-title">Agent 开发实践：SSE 流式返回与 Vibe Coding</h1>
+    <div class="article-meta">作者：汤文&nbsp;&nbsp;日期：2026-09-13&nbsp;&nbsp;阅读时长：约 5 分钟</div>
+
+    <p>这一篇记录开发层面的两个实践话题：流式返回的技术选型，以及日常使用 AI 编码的思路。</p>
+
+    <h2>SSE 流式返回原理</h2>
+    <p>SSE 基于 HTTP 协议的长连接实现，可实现服务器端向客户端单向持续推送数据，数据格式为 <code class="inline-code">text/event-stream</code>。</p>
+    <p>SSE（Server-Sent Events，服务器发送事件）的核心原理就是：利用标准的 HTTP 长连接 + 流式响应（streaming response），让服务器在一次 HTTP 请求中持续、单向地向客户端推送数据，而不需要客户端反复发起新请求。</p>
+    <ul>
+      <li>客户端发起的是一个普通的 HTTP GET 请求，带上 <code class="inline-code">Accept: text/event-stream</code> 头（表明我想要 SSE 流）。</li>
+      <li>服务器响应时不关闭连接，而是保持这个 HTTP 连接长期打开（long-lived connection），并持续往这个连接里写数据。</li>
+      <li><strong>单向性</strong>：只能服务器推给客户端。如果客户端要发数据，仍需走普通的 HTTP 请求（或 AJAX / Fetch）。</li>
+      <li>SSE 具备异常重连、心跳等机制；心跳的作用是防止 Nginx、API 网关或防火墙因连接长时间无数据传输触发空闲超时，主动切断长连接。</li>
+      <li><strong>轻量</strong>：相比 WebSocket，SSE 不需要协议升级（<code class="inline-code">Upgrade: websocket</code>），复用现有 HTTP 基础设施，代理、负载均衡、CDN 等兼容性更好。</li>
+    </ul>
+
+    <h2>SSE 与 WebSocket 的对比</h2>
+    <ul>
+      <li><strong>WebSocket</strong>：先通过 HTTP 握手，然后升级成独立的 <strong>ws/wss 协议</strong>，实现<strong>全双工</strong>（双方随时发数据），支持二进制。</li>
+      <li><strong>SSE</strong>：<strong>始终是 HTTP</strong>，只单向，纯文本，浏览器原生支持更简单（EventSource）。</li>
+    </ul>
+
+    <h2>平时使用 Vibe Coding 的思路</h2>
+    <p>先给 AI 定<strong>氛围、规范、边界</strong>，避免写飘。具体包括三点：</p>
+    <ul>
+      <li>用的什么技术栈。</li>
+      <li>代码风格：简洁、可维护、注释多少、命名规范。</li>
+      <li>约束：轻量化，禁止过度封装、不要冗余，最小可用版本，明确告诉它<strong>不要</strong>做什么。</li>
+    </ul>
+
+    <h2>详细需求文档</h2>
+    <ul>
+      <li>只实现<strong>核心功能</strong>，不做边缘逻辑。</li>
+      <li>引入反馈环，告诉 AI：「如果你对需求有任何不确定的地方，请在编写代码前先询问我。」</li>
+    </ul>
+
+    <h2>Bug 修复</h2>
+    <ul>
+      <li>将错误信息贴给它，让报错原文进入上下文，避免靠猜。</li>
+      <li>如果 AI 陷入了逻辑死循环（反复修不好一个 Bug），最好的办法是开启一个全新的对话窗口，并将当前最新的代码和明确的单一目标重新喂给它。</li>
+    </ul>
+  </div>
+</body>
+</html>

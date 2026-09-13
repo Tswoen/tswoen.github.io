@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>前沿追踪：Forge 如何用外围工程弥补小模型短板</title>
+  <style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", sans-serif; background: linear-gradient(180deg, #0f172a 0%, #1a1f3a 100%); background-image: linear-gradient(rgba(99, 102, 241, 0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(99, 102, 241, 0.05) 1px, transparent 1px), linear-gradient(180deg, #0f172a 0%, #1a1f3a 100%); background-size: 40px 40px, 40px 40px, 100% 100%; color: #cbd5e1; line-height: 1.75; min-height: 100vh; }
+.article-container { max-width: 820px; margin: 0 auto; padding: 48px 28px; }
+.article-title { color: #e2e8f0; font-size: 2rem; font-weight: 600; line-height: 1.3; margin-bottom: 18px; }
+.article-meta { color: #94a3b8; font-size: 0.95rem; padding-bottom: 20px; margin-bottom: 32px; border-bottom: 1px solid rgba(148, 163, 184, 0.15); }
+.article-container h2 { color: #d1d5db; font-size: 1.5rem; font-weight: 600; margin: 40px 0 18px; }
+.article-container p { margin-bottom: 18px; font-size: 1rem; color: #cbd5e1; }
+.inline-code { background-color: #1e1b4b; color: #c4b5fd; padding: 2px 8px; border-radius: 4px; font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; font-size: 0.92em; }
+.article-container ul { padding-left: 24px; margin-bottom: 18px; }
+.article-container li { margin-bottom: 8px; color: #cbd5e1; }
+.article-container strong { color: #e2e8f0; font-weight: 600; }
+::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar-track { background: rgba(15, 23, 42, 0.5); }
+::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #475569; }
+@media (max-width: 640px) { .article-container { padding: 32px 16px; } .article-title { font-size: 1.6rem; } }
+  </style>
+</head>
+<body>
+  <div class="article-container">
+    <h1 class="article-title">前沿追踪：Forge 如何用外围工程弥补小模型短板</h1>
+    <div class="article-meta">作者：汤文&nbsp;&nbsp;日期：2026-09-13&nbsp;&nbsp;阅读时长：约 8 分钟</div>
+
+    <p>Forge 是一个很有意思的案例：它证明了在模型能力之外，外围工程（也就是 Harness）可以补齐相当大一部分差距。</p>
+
+    <h2>问题背景</h2>
+    <ul>
+      <li>小模型单步准确率 90%，连续 10 步准确率只有 30% 左右。</li>
+      <li>大模型单步准确率 99%，连续 10 步准确率 90% 左右。</li>
+    </ul>
+    <p>单步差距不大，但多步任务上差距被指数放大。Forge 通过 5 层防护来提高准确率。</p>
+
+    <h2>1. 救援层 / 解析层</h2>
+    <p><strong>问题</strong>：工具调用时，模型意图对了，但输出格式不对，模型输出了自由文本而不是结构化 JSON。</p>
+    <p><strong>方法</strong>：三种抢救策略。</p>
+    <ul>
+      <li>正则提取代码块包裹的 JSON。</li>
+      <li>识别推理模型的「排练语法」。</li>
+      <li>识别 Qwen 的 XML 格式工具调用。</li>
+    </ul>
+
+    <h2>2. 重试提示</h2>
+    <p><strong>问题</strong>：救援无效。</p>
+    <p><strong>方法</strong>：</p>
+    <ul>
+      <li>注入纠正消息：「请用工具调用格式重试」。</li>
+      <li>工具不存在时列出可用工具。</li>
+      <li>预算限制：最多 3 次，超过就终止。</li>
+      <li>成功调用重置计数器。</li>
+    </ul>
+
+    <h2>3. 步骤强制执行</h2>
+    <p><strong>问题</strong>：小模型爱跳步，比如跳过中间步骤直接调终端工具，或者前置依赖没完成就想出结论。</p>
+    <p><strong>方法</strong>：升级式纠正，分三次注入不同语气的纠正消息，三次后仍违规则报错终止。</p>
+    <ul>
+      <li>第 1 次跳步：礼貌提醒。</li>
+      <li>第 2 次跳步：直接要求。</li>
+      <li>第 3 次跳步：强硬命令。</li>
+      <li>之后跳步：报错终止。</li>
+    </ul>
+    <p>同时限制工具调用的前置条件，比如获取详情任务必须在搜索列表任务之后。</p>
+
+    <h2>4. 错误恢复层</h2>
+    <p>区分工具执行错误类型：</p>
+    <ul>
+      <li><strong>硬错误</strong>：代码 bug、权限不足等错误，记入连续错误计数器，超两次则终止。</li>
+      <li><strong>解析错误</strong>：参数猜错等解析错误不记入计数器，仅引导模型换参数重试。</li>
+    </ul>
+    <p>为什么要区分：解析错误这种即使工具本身正常，猜错三次也会终止；进行区分后可以防止系统过早放弃。</p>
+
+    <h2>5. 上下文压缩</h2>
+    <p><strong>问题</strong>：多步的工作流会产生大量的上下文，包括每一步的工具调用、工具返回结果、推理过程、纠错信息。在消费级的 GPU 上，过长上下文会把模型从 GPU 挤到 CPU，速度降低 10~100 倍。</p>
+    <p><strong>方法</strong>：三阶段确定性压缩策略。</p>
+    <ul>
+      <li><strong>第一阶段</strong>：删除所有纠正消息，把旧的工具返回结果截断到前两百个字符。</li>
+      <li><strong>第二阶段</strong>：如果第一阶段不够，直接删除旧的工具返回结果，但保留模型的推理过程。</li>
+      <li><strong>第三阶段</strong>：如果还不够，删除推理和失败的文本回复，只保留工具调用的骨架。</li>
+    </ul>
+    <p><strong>关键设计</strong>：最近的几轮对话永远不压缩，只有老的内容才会被压缩。三个阶段都是确定性的操作，不调用模型，0 延迟。</p>
+
+    <h2>VRAM 感知预算机制</h2>
+    <p>Forge 启动时查询 <code class="inline-code">nvidia-smi</code>，获取 GPU 显存总量，根据显存大小自动设定上下文预算。某些像 ollama 这样的推理引擎在显存不足时会静默回退到 CPU 推理，不给任何警告，速度直接降十到一百倍，所以这个预算是必要的。</p>
+
+    <h2>一个有意思的设计</h2>
+    <p><strong>问题</strong>：小模型在有工具可用的时候，经常搞不清楚什么时候该调工具。</p>
+    <p><strong>方法</strong>：给模型加一个叫 <code class="inline-code">response</code> 的工具，模型想回复文本时，调用 <code class="inline-code">response</code> 工具传入回复内容。这样模型永远处于调用工具的模式，不用在调用工具和回复文本之间做选择。</p>
+
+    <h2>达成的效果</h2>
+    <p>加防护层的八十亿参数本地模型得分 86.5%，逼近无纠错层闭源模型的 87.2%；消融实验证明五层防护缺一不可。</p>
+    <p>GitHub 项目链接：<code class="inline-code">https://github.com/antoinezambelli/forge</code></p>
+  </div>
+</body>
+</html>

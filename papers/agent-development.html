@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Agent 开发进阶：选模型、提速度与 Workflow 的边界</title>
+  <style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", sans-serif; background: linear-gradient(180deg, #0f172a 0%, #1a1f3a 100%); background-image: linear-gradient(rgba(99, 102, 241, 0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(99, 102, 241, 0.05) 1px, transparent 1px), linear-gradient(180deg, #0f172a 0%, #1a1f3a 100%); background-size: 40px 40px, 40px 40px, 100% 100%; color: #cbd5e1; line-height: 1.75; min-height: 100vh; }
+.article-container { max-width: 820px; margin: 0 auto; padding: 48px 28px; }
+.article-title { color: #e2e8f0; font-size: 2rem; font-weight: 600; line-height: 1.3; margin-bottom: 18px; }
+.article-meta { color: #94a3b8; font-size: 0.95rem; padding-bottom: 20px; margin-bottom: 32px; border-bottom: 1px solid rgba(148, 163, 184, 0.15); }
+.article-container h2 { color: #d1d5db; font-size: 1.5rem; font-weight: 600; margin: 40px 0 18px; }
+.article-container p { margin-bottom: 18px; font-size: 1rem; color: #cbd5e1; }
+.inline-code { background-color: #1e1b4b; color: #c4b5fd; padding: 2px 8px; border-radius: 4px; font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; font-size: 0.92em; }
+.article-container ul { padding-left: 24px; margin-bottom: 18px; }
+.article-container li { margin-bottom: 8px; color: #cbd5e1; }
+.article-container strong { color: #e2e8f0; font-weight: 600; }
+::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar-track { background: rgba(15, 23, 42, 0.5); }
+::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #475569; }
+@media (max-width: 640px) { .article-container { padding: 32px 16px; } .article-title { font-size: 1.6rem; } }
+  </style>
+</head>
+<body>
+  <div class="article-container">
+    <h1 class="article-title">Agent 开发进阶：选模型、提速度与 Workflow 的边界</h1>
+    <div class="article-meta">作者：汤文&nbsp;&nbsp;日期：2026-09-13&nbsp;&nbsp;阅读时长：约 8 分钟</div>
+
+    <p>这一篇解决三个工程上很实际的问题：模型怎么选、响应速度怎么提、什么时候该用 workflow 而不是 agent。</p>
+
+    <h2>如何选模型</h2>
+    <p>「没有最好的模型，只有最适合的模型。」先看两类模型的定位。</p>
+    <p><strong>旗舰模型</strong>（Flagship / Pro / Opus / o3 / GPT-5 / Claude Opus / Gemini Pro）：</p>
+    <ul>
+      <li><strong>特点</strong>：参数规模最大（或激活参数多）、推理深度最强、复杂任务（如深度逻辑、长链思考、编程 Agent、多步规划）表现最佳。</li>
+      <li><strong>优势</strong>：高准确率、强 reasoning（尤其是 o-series / reasoning 模式）、复杂问题解决能力强。</li>
+      <li><strong>劣势</strong>：响应慢（尤其是思考型模型）、成本高、并发限流可能较严。</li>
+    </ul>
+    <p><strong>蒸馏模型 / 轻量模型</strong>（Distilled / Mini / Flash / Haiku）：</p>
+    <ul>
+      <li><strong>特点</strong>：通过知识蒸馏（distillation，从旗舰模型生成合成数据训练小模型）或 MoE（混合专家，只激活部分参数）实现「用更少资源接近旗舰性能」。</li>
+      <li><strong>优势</strong>：速度快（低延迟、高吞吐）、成本低（常为旗舰的 1/3~1/10）、适合高并发或实时场景，性能在简单-中等任务上接近旗舰。</li>
+      <li><strong>劣势</strong>：极端复杂推理或边缘案例上可能略逊旗舰（reasoning ceiling 较低）。</li>
+    </ul>
+    <p>如何选择？可根据下面几条场景判断：</p>
+    <ul>
+      <li>任务复杂度（最重要）。</li>
+      <li>速度与实时性。</li>
+      <li>成本敏感度：输出 token 通常比输入贵 5-10 倍。</li>
+      <li>上下文长度与多模态。</li>
+      <li>部署与数据隐私：需要隐私的，就选开源的。</li>
+      <li>中文 / 多语言能力。</li>
+    </ul>
+
+    <h2>如何提升 Agent 的响应速度</h2>
+    <ul>
+      <li>选择更快的模型，比如 <strong>Doubao-Seed-1.6-flash</strong> 这类轻量模型。</li>
+      <li>优化大模型推理流程：KV Cache 缓存优化、Prompt Cache 缓存优化；系统提示词要动态结合（静态的放前面，动态的放后面）；合理设置 max token 与 temperature。</li>
+      <li>设置语义缓存等方式，让相似问题直接命中缓存结果，减少重复推理。</li>
+    </ul>
+
+    <h2>Workflow 和 Agent 的区别</h2>
+    <p>Agent 是一个可以独立完成某一项任务的系统，核心是<strong>自主</strong>：大模型主动且动态地执行流程与工具调用，独立地完成某一项任务（有一定风险）。</p>
+    <p>比如给 Agent 系统一个任务，Agent 会通过状态感知，自动调用各种工具来达成这个目标。而 workflow 只会按照某个流程来完成这个任务。</p>
+    <p>Workflow 是通过预定义的流程来协调大模型和工具的系统，但它稳定高效。</p>
+    <p>所以工程上的取舍是：流程确定、要求稳定可控的场景优先用 workflow；任务开放、路径无法预先穷举的场景才交给 agent，并配套护栏与验证机制。</p>
+  </div>
+</body>
+</html>
